@@ -127,6 +127,30 @@ namespace TakoBoyStudios.TopDown2D
 
         InputAction _submitAction;
         InputAction _navigateAction;
+        InputAction _interactAction;
+
+        /// <summary>
+        /// The gameplay map's Interact, what a player presses to take the thing they are standing at.
+        ///
+        /// **Deliberately on the gameplay map and not UI/Submit.** Reaching for Submit would mean
+        /// pushing the UI map, which turns the gameplay map off entirely, and the whole point of an
+        /// in-world choice is that the player keeps walking, aiming and dodging while they make it.
+        ///
+        /// Optional, the same as Bomb: an older input asset without the action leaves this null and
+        /// anything asking for it simply never fires.
+        /// </summary>
+        public InputAction InteractAction
+        {
+            get
+            {
+                if (_interactAction == null && _playerInput != null)
+                    _interactAction = _playerInput.actions.FindAction("Interact");
+                return _interactAction;
+            }
+        }
+
+        /// <summary>True on the frame Interact went down, and false whenever input is locked.</summary>
+        public bool InteractPressed => !InputLocked && InteractAction != null && InteractAction.WasPressedThisFrame();
 
         /// <summary>The UI map's Submit, what a screen advances on. Null if the asset lacks it.</summary>
         public InputAction SubmitAction
