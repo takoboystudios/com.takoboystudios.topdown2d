@@ -1,0 +1,23 @@
+{
+  "name": "com.takoboystudios.topdown2d",
+  "version": "1.0.0",
+  "displayName": "com.takoboystudios.topdown2d",
+  "description": "The entity, movement and combat foundation for top-down 2D games: entities with health and hit lag, an eight-direction motor, hit and hurt boxes, grid navigation, projectiles, effects, and a status system whose statuses the game defines as assets.",
+  "unity": "2021.3",
+  "keywords": [
+    "2d",
+    "top-down",
+    "entity",
+    "combat",
+    "movement",
+    "pathfinding",
+    "status"
+  ],
+  "author": {
+    "name": "TakoBoy Studios",
+    "url": "https://github.com/takoboystudios"
+  },
+  "dependencies": {
+  },
+  "type": "library"
+}

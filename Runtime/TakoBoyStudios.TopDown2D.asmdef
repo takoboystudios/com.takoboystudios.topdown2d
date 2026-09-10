@@ -1,0 +1,19 @@
+{
+    "name": "TakoBoyStudios.TopDown2D",
+    "rootNamespace": "TakoBoyStudios.TopDown2D",
+    "references": [
+        "TakoBoyStudios.Core",
+        "TakoBoyStudios.Animation",
+        "Unity.InputSystem",
+        "ZString"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
