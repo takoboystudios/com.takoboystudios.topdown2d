@@ -53,6 +53,30 @@ namespace TakoBoyStudios.TopDown2D
             }
         }
 
+        /// <summary>
+        /// How many seated players are still standing.
+        ///
+        /// The number to compare against when something waits for everybody: a door that waits for
+        /// all seats rather than all survivors never opens once somebody is down, and strands the
+        /// player who is still alive in a room with no way out.
+        /// </summary>
+        public static int LivingCount
+        {
+            get
+            {
+                Prune();
+
+                int count = 0;
+                for (int i = 0; i < _players.Count; i++)
+                {
+                    if (_players[i] != null && !_players[i].IsDead)
+                        count++;
+                }
+
+                return count;
+            }
+        }
+
         /// <summary>The highest occupied index plus one. What to loop to when walking every seat.</summary>
         public static int SeatCount
         {
