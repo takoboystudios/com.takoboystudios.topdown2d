@@ -232,6 +232,13 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public virtual string CharacterId => "player";
 
+        /// <summary>
+        /// Give up the seat when the body goes. A destroyed player already reads as an empty seat
+        /// through Unity's null comparison, but leaving explicitly is what raises
+        /// <see cref="Players.Left"/> so a HUD block can hide itself rather than sitting on a corpse.
+        /// </summary>
+        void OnDestroy() => Players.Leave(this);
+
         public virtual void Face(Vector2 direction)
         {
             if (direction.sqrMagnitude < 0.0001f)
@@ -305,6 +312,10 @@ namespace TakoBoyStudios.TopDown2D
 
             // Same pattern as the camera line above: the player announces itself and whoever
             // cares binds. The HUD reads health off this reference (T-326, T-336).
+            // Take a seat before announcing, so anything reacting to the spawn can already ask which
+            // player this is and how many there are.
+            Players.Join(this);
+
             EntityEvents.ReportPlayerSpawned(this);
         }
 
