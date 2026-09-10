@@ -162,10 +162,18 @@ namespace TakoBoyStudios.TopDown2D
         // PACKAGE COUPLING (T-356): CombatLayers.ActiveMask ties this to HellWilds.Rooms; the
         // BreakableMask and the collisionMask==0 case tie it to this game's layers. See the
         // extraction notes at the top of the file.
+        /// <summary>
+        /// Whether the shared co-op view is a wall for this body. Set by <see cref="Player"/> on
+        /// itself, so no prefab has to know the layer exists and nothing but a player is ever held in
+        /// by it.
+        /// </summary>
+        public bool ContainedByPlayerFrame { get; set; }
+
         int EffectiveCollisionMask =>
             (containedByCombatBoundary
                 ? collisionMask | (CombatRules.ContainmentMask() & ~_excusedMask)
                 : (int)collisionMask)
+            | (ContainedByPlayerFrame ? CombatRules.FrameMask() : 0)
             | (collisionMask == 0 ? 0 : BreakableMask);
         #endregion
 

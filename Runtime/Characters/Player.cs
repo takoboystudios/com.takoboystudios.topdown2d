@@ -316,6 +316,11 @@ namespace TakoBoyStudios.TopDown2D
             // player this is and how many there are.
             Players.Join(this);
 
+            // Only players are held inside the shared view. Set here rather than on the prefab so the
+            // layer stays an implementation detail of whoever raises the frame.
+            if (motor != null)
+                motor.ContainedByPlayerFrame = true;
+
             EntityEvents.ReportPlayerSpawned(this);
         }
 

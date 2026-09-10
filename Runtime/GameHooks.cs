@@ -90,6 +90,19 @@ namespace TakoBoyStudios.TopDown2D
         public static Func<int> ExtraContainmentMask;
 
         /// <summary>
+        /// Layers that hold a player inside the shared view, on top of their own mask.
+        ///
+        /// Separate from <see cref="ExtraContainmentMask"/> because it holds a different set of
+        /// bodies for a different reason. That one is an encounter sealing everything in; this one is
+        /// a co-op frame that only players may not leave. Walling enemies and projectiles with it
+        /// would stop a shot the moment it left the screen and pin a chasing enemy to the view, all
+        /// through ordinary traversal, which is not what a shared camera is for.
+        ///
+        /// Unset means nothing extra, which is the answer for a solo game and for one player.
+        /// </summary>
+        public static Func<int> PlayerFrameMask;
+
+        /// <summary>
         /// Statuses a heavy hit removes. Hell Wilds breaks a freeze with one; another game may break
         /// nothing. Unset means a heavy hit removes nothing, which is the right default.
         /// </summary>
@@ -106,11 +119,14 @@ namespace TakoBoyStudios.TopDown2D
 
         public static int ContainmentMask() => ExtraContainmentMask != null ? ExtraContainmentMask() : 0;
 
+        public static int FrameMask() => PlayerFrameMask != null ? PlayerFrameMask() : 0;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void Clear()
         {
             WeaknessRule = null;
             ExtraContainmentMask = null;
+            PlayerFrameMask = null;
             HeavyHitBreaks = null;
         }
     }
