@@ -750,8 +750,13 @@ namespace TakoBoyStudios.TopDown2D
         {
             // Chill slows and Frozen stops outright (T-408). Read through the cached holder, since
             // this is asked for every moving entity every frame.
+            // What the run has made of them first, then what is happening to them now. Order matters:
+            // a build's plus two speed should be slowed by a chill like the rest of it, rather than
+            // being immune because it was added afterwards.
+            float speed = RunStats.MoveSpeedFor(this, m_moveSpeed);
+
             Status.StatusHolder statuses = Statuses;
-            return statuses != null ? m_moveSpeed * statuses.MoveSpeedMultiplier : m_moveSpeed;
+            return statuses != null ? speed * statuses.MoveSpeedMultiplier : speed;
         }
 
         // ----------------------------

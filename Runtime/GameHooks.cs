@@ -27,6 +27,41 @@ namespace TakoBoyStudios.TopDown2D
     }
 
     /// <summary>
+    /// What a run's accumulated progression does to an entity's numbers (T-347).
+    ///
+    /// The entity layer owns a character's base sheet and knows nothing about builds, perks, relics
+    /// or meta progression, all of which are per game. So it asks: here is the number I was about to
+    /// use, what is it really? Unset means the number is already right, which is the answer for every
+    /// enemy, every test entity, and every game that has no such system.
+    ///
+    /// Both take the base value rather than returning a multiplier, deliberately. A build can add
+    /// two points of move speed or add ten percent, and only the thing holding the stat sheet knows
+    /// how those compose. Handing back a bare multiplier would force flat additions to be faked as
+    /// fractions of a base the caller cannot see.
+    /// </summary>
+    public static class RunStats
+    {
+        /// <summary>Given an entity and the damage it was about to deal, the damage it actually deals.</summary>
+        public static Func<Entity, float, float> OutgoingDamage;
+
+        /// <summary>Given an entity and its base move speed, the speed it actually moves at.</summary>
+        public static Func<Entity, float, float> MoveSpeed;
+
+        public static float OutgoingDamageFor(Entity entity, float baseDamage) =>
+            entity != null && OutgoingDamage != null ? OutgoingDamage(entity, baseDamage) : baseDamage;
+
+        public static float MoveSpeedFor(Entity entity, float baseSpeed) =>
+            entity != null && MoveSpeed != null ? MoveSpeed(entity, baseSpeed) : baseSpeed;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void Clear()
+        {
+            OutgoingDamage = null;
+            MoveSpeed = null;
+        }
+    }
+
+    /// <summary>
     /// The rules the entity layer needs but does not own, supplied by whichever game is using it
     /// (T-409).
     ///

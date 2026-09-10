@@ -68,6 +68,11 @@ namespace TakoBoyStudios.TopDown2D
             if (attacker != null)
                 damage *= attacker.DamageDealtMultiplier;
 
+            // What the attacker's run has made of them (T-347). Statuses are what is happening to
+            // them now; this is what they have accumulated, and the two are different questions with
+            // different owners. Unset for everything that has no build, which is every enemy.
+            damage = RunStats.OutgoingDamageFor(source, damage);
+
             Status.StatusHolder victim = target.Statuses;
             if (victim != null)
                 damage *= victim.DamageTakenMultiplier(values);
