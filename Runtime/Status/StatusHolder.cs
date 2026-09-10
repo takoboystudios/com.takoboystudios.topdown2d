@@ -272,6 +272,22 @@ namespace TakoBoyStudios.TopDown2D.Status
         /// a hit, and carries no knockback, so a burn is not a displacement and cannot set off the
         /// statuses that wait for one.
         /// </summary>
+        /// <summary>
+        /// The status whose damage is being applied right this instant, or null when the hit in flight
+        /// is an ordinary attack.
+        ///
+        /// Ambient context for one synchronous call, read by <see cref="Entity.DealDamage"/> when it
+        /// announces the hit. Status damage goes down the same path as a sword swing, and by the time
+        /// it arrives there is nothing left in the hit itself to say where it came from: no element,
+        /// no knockback, an applier who is just whoever set the status. Something has to carry the
+        /// provenance across that call, and the alternative is a second damage path that death,
+        /// scoring and hit reporting would all have to be taught about twice.
+        ///
+        /// Set and restored around the one call that needs it, and never observed from anywhere but
+        /// inside that call.
+        /// </summary>
+        public static StatusDefinition DamagingStatus { get; private set; }
+
         void DealStatusDamage(StatusDefinition definition, int damage, Entity applier)
         {
             if (damage <= 0 || _owner == null || _owner.IsDead)
@@ -287,7 +303,20 @@ namespace TakoBoyStudios.TopDown2D.Status
 
             DamageInfo info = new DamageInfo(values, applier != null ? applier : _owner, _owner, Vector2.zero);
             StatusEvents.ReportDamaged(_owner, definition, damage, applier);
-            _owner.DealDamage(new HitEvent(info, _owner.gameObject));
+
+            // Restored rather than nulled: one status's damage can kill something whose death applies
+            // another status, and a plain null on the way out would tell the outer hit it was an
+            // attack. Nested is rare and wrong-looking, which is exactly when a guard has to hold.
+            StatusDefinition previous = DamagingStatus;
+            DamagingStatus = definition;
+            try
+            {
+                _owner.DealDamage(new HitEvent(info, _owner.gameObject));
+            }
+            finally
+            {
+                DamagingStatus = previous;
+            }
         }
 
         // ---------------------------------------------------------------- ticking

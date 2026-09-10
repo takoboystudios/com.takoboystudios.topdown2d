@@ -827,7 +827,7 @@ namespace TakoBoyStudios.TopDown2D
             base.DealDamage(hitEvent);
 
             if (wasAlive && Health <= 0)
-                EntityEvents.ReportEnemyKilled(this, RegistryId, Position);
+                EntityEvents.ReportEnemyKilled(this, RegistryId, Position, hitEvent.damageInfo.source);
         }
 
         public override void Die()

@@ -555,6 +555,11 @@ namespace TakoBoyStudios.TopDown2D
             m_hp -= damage;
             m_hp = Mathf.Clamp(m_hp, 0, int.MaxValue);
 
+            // Announced before the death branch, so a killing blow is still a hit. Anything that fires
+            // on hits would otherwise silently skip the one hit in an encounter that most wants to be
+            // reacted to, and a Perk that ignites on hit would never ignite the thing it killed.
+            EntityEvents.ReportHitLanded(info, Status.StatusHolder.DamagingStatus);
+
             if (m_hp <= 0)
             {
                 Die();

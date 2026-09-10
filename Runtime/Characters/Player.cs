@@ -199,6 +199,15 @@ namespace TakoBoyStudios.TopDown2D
         /// Stand still facing a direction, for a scripted moment: waking at the tavern faces the bar
         /// (T-371). Characters with their own idle facing override this to turn their pose too.
         /// </summary>
+        /// <summary>
+        /// Which character this is, as the game's own data names them: "grim", "sen".
+        ///
+        /// The package has no roster and never will, so the base answer is deliberately useless and
+        /// each character class says who it is. What reads it is anything keyed per character: which
+        /// Perks may be offered, which dialogue lines are theirs, which save slot a run belongs to.
+        /// </summary>
+        public virtual string CharacterId => "player";
+
         public virtual void Face(Vector2 direction)
         {
             if (direction.sqrMagnitude < 0.0001f)
