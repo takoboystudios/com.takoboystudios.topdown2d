@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace TakoBoyStudios.TopDown2D
 {
     public class AnimConst
@@ -31,14 +33,21 @@ namespace TakoBoyStudios.TopDown2D
         public const string NorthWest = "nw";
     }
 
-    public enum Size
+    /// <summary>
+    /// How wide a ground shadow is, in pixels at ground level. Each value is its own width, so the
+    /// number in the Inspector is the number on screen, and each names an animation in the shared
+    /// shadow asset (see <see cref="Shadows"/>). Values are explicit because they are serialized.
+    /// </summary>
+    public enum ShadowSize
     {
-        Off,
-        Small,
-        Medium,
-        Large,
-        XLarge,
-        XXLarge,
+        Off = 0,
+        [InspectorName("4px")] Px4 = 4,
+        [InspectorName("6px")] Px6 = 6,
+        [InspectorName("8px")] Px8 = 8,
+        [InspectorName("12px")] Px12 = 12,
+        [InspectorName("16px")] Px16 = 16,
+        [InspectorName("20px")] Px20 = 20,
+        [InspectorName("24px")] Px24 = 24,
     }
 
     public enum Element

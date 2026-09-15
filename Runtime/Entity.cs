@@ -64,12 +64,17 @@ namespace TakoBoyStudios.TopDown2D
 
         [BoxGroup("Components")]
         [SerializeField]
-        protected Size m_shadowSize;
+        [Tooltip("How wide the ground shadow is on the floor, in pixels. It shrinks as the body rises. 16px suits a 16px body; Off for no shadow.")]
+        protected ShadowSize m_shadowSize;
 
         [BoxGroup("Components")]
         [SerializeField]
-        [HideIf("@this.m_shadowSize == TakoBoyStudios.TopDown2D.Size.Off")]
+        [HideIf("@this.m_shadowSize == TakoBoyStudios.TopDown2D.ShadowSize.Off")]
+        [Tooltip("The Shadow child's animator, pointed at the shared shadow asset. Hangs off the root so it stays on the floor.")]
         protected SpriteAnimation m_shadowAnimator;
+
+        /// <summary>The shadow frame on screen, so it is only set when the height moves it into another.</summary>
+        int _shadowFrame = -1;
 
 
         [BoxGroup("Components")]
@@ -301,10 +306,6 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         protected virtual void PhysicsTick(float fdt) { }
 
-        // A shadow only reads once the body is clearly off the floor; below this it just clutters the
-        // sprite, so it is hidden. Pixels of fake height.
-        const float ShadowLiftThreshold = 1f;
-
         void LateUpdate()
         {
             // Visual lift based on fake vertical height. Only the visual root rises; the Shadow child
@@ -322,23 +323,7 @@ namespace TakoBoyStudios.TopDown2D
             }
 
             LiftHitboxes(height);
-            UpdateShadowVisibility(height);
-        }
-
-        /// <summary>
-        /// Show the ground shadow only while the entity is actually lifted (a jump, a hover, flight).
-        /// Flush on the floor it is turned off, because an always-on shadow makes it harder to read who
-        /// is grounded and who is not. Toggles the renderer rather than the object so the shadow's own
-        /// animation keeps ticking and reappears instantly on the next lift.
-        /// </summary>
-        void UpdateShadowVisibility(float height)
-        {
-            if (m_shadowAnimator == null || m_shadowSize == Size.Off)
-                return;
-
-            SpriteRenderer shadowRenderer = m_shadowAnimator.renderer;
-            if (shadowRenderer != null)
-                shadowRenderer.enabled = height > ShadowLiftThreshold;
+            _shadowFrame = Shadows.Show(m_shadowAnimator, m_shadowSize, height, _shadowFrame);
         }
 
         float[] _hitboxBaseY;
@@ -720,14 +705,22 @@ namespace TakoBoyStudios.TopDown2D
                     return;
             }
 
-            if (m_shadowSize == Size.Off)
+            if (m_shadowSize == ShadowSize.Off)
             {
                 m_shadowAnimator.gameObject.SetActive(false);
                 return;
             }
 
             m_shadowAnimator.gameObject.SetActive(true);
-            m_shadowAnimator.Play($"{m_shadowSize.ToString().ToLower()}");
+
+            // Shown on the floor too: frame 0 is the grounded shadow, and it shrinks from there.
+            SpriteRenderer shadowRenderer = m_shadowAnimator.renderer;
+            if (shadowRenderer != null)
+                shadowRenderer.enabled = true;
+
+            _shadowFrame = Shadows.Show(m_shadowAnimator, m_shadowSize, Z, -1);
+            if (_shadowFrame < 0)
+                Debug.LogWarning($"[Entity] {name} wants a {m_shadowSize} shadow but its Shadow animator has no '{Shadows.AnimationName(m_shadowSize)}'. Point it at the shared shadow asset.", this);
         }
 
         public virtual void FlipX(bool flip)
