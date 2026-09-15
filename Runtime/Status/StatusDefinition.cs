@@ -80,6 +80,17 @@ namespace TakoBoyStudios.TopDown2D.Status
         [Tooltip("For whoever tunes it. Never shown to a player.")]
         [SerializeField] string designNote;
 
+        [BoxGroup("Look")]
+        [Tooltip(
+            "Effect shown on the victim while this is on, taken from the pool and released when it ends. "
+                + "Use an Effect prefab with Stays Until Released ticked. Empty for none."
+        )]
+        [SerializeField] GameObject vfx;
+
+        [BoxGroup("Look")]
+        [Tooltip("Where the effect sits, in pixels from the victim's position, before their height is added. Around (0, 6) sits on a 16px body.")]
+        [SerializeField] Vector2 vfxOffset = new Vector2(0f, 6f);
+
         public string Id => id;
         public string DisplayNameId => displayNameId;
         public StatusRefresh Refresh => refresh;
@@ -87,6 +98,17 @@ namespace TakoBoyStudios.TopDown2D.Status
         public float DamagePerStackPerSecond => damagePerStackPerSecond;
         public float DamagePerStackOnDisplace => damagePerStackOnDisplace;
         public string DesignNote => designNote;
+
+        /// <summary>The effect shown on a victim, or null.</summary>
+        public GameObject Vfx => vfx;
+
+        /// <summary>Where the effect sits on the victim, before their height.</summary>
+        public Vector2 VfxOffset => vfxOffset;
+
+        [System.NonSerialized] string _vfxPoolName;
+
+        /// <summary>The pool the effect comes from. Cached, because reading a name off an asset makes a string every time.</summary>
+        public string VfxPoolName => vfx == null ? null : (_vfxPoolName ??= vfx.name);
 
         /// <summary>How long it runs for at a given potency.</summary>
         public virtual float DurationFor(float potency) => duration * Mathf.Max(0.01f, potency);
@@ -145,6 +167,12 @@ namespace TakoBoyStudios.TopDown2D.Status
 
         /// <summary>Fractional damage carried between frames, so damage over time is honest on an int health pool.</summary>
         public float damageCarry;
+
+        /// <summary>The effect showing this on the victim, or null. Owned by the holder, which acquires and releases it.</summary>
+        public GameObject vfx;
+
+        /// <summary>The effect's sorting group, cached when it was acquired so it can be kept in front of the victim.</summary>
+        public UnityEngine.Rendering.SortingGroup vfxSorting;
 
         public bool IsActive => definition != null && stacks > 0;
     }

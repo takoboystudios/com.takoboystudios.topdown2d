@@ -43,6 +43,15 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, MinValue(0)]
         int damageEndFrame = 2;
 
+        [BoxGroup("Effect")]
+        [Tooltip(
+            "On for an effect that stays until something releases it, like a status shown on a body. "
+                + "Off releases it when its animation finishes, which a looping clip reports at the end "
+                + "of every loop, so a one-shot puff drawn with a looping clip still goes away."
+        )]
+        [SerializeField]
+        bool staysUntilReleased;
+
         #endregion
 
         #region Setup
@@ -161,7 +170,7 @@ namespace TakoBoyStudios.TopDown2D
                     damageBox.CheckArea(damageBox.transform.position);
             }
 
-            if (m_entityAnimator == null || m_entityAnimator.IsDone)
+            if (!staysUntilReleased && (m_entityAnimator == null || m_entityAnimator.IsDone))
                 Dispose();
 
             return true;

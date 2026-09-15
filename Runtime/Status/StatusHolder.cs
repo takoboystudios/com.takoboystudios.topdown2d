@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using TakoBoyStudios.Core;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace TakoBoyStudios.TopDown2D.Status
 {
@@ -32,6 +34,7 @@ namespace TakoBoyStudios.TopDown2D.Status
         readonly Dictionary<StatusDefinition, float> _cooldowns = new Dictionary<StatusDefinition, float>();
 
         Entity _owner;
+        SortingGroup _ownerSorting;
 
         public Entity Owner => _owner;
 
@@ -54,6 +57,8 @@ namespace TakoBoyStudios.TopDown2D.Status
         {
             if (_owner == null)
                 _owner = GetComponent<Entity>();
+
+            _ownerSorting = GetComponent<SortingGroup>();
         }
 
         // Recycling is cleared by Entity.OnAcquired, which is the precise moment a pooled body starts
@@ -215,6 +220,7 @@ namespace TakoBoyStudios.TopDown2D.Status
             if (index < 0)
                 return;
 
+            ReleaseVfx(_active[index]);
             _active.RemoveAt(index);
             if (_owner != null)
                 StatusEvents.ReportExpired(_owner, definition);
@@ -226,6 +232,7 @@ namespace TakoBoyStudios.TopDown2D.Status
             for (int i = _active.Count - 1; i >= 0; i--)
             {
                 StatusDefinition definition = _active[i].definition;
+                ReleaseVfx(_active[i]);
                 _active.RemoveAt(i);
 
                 if (silent)
@@ -386,11 +393,124 @@ namespace TakoBoyStudios.TopDown2D.Status
                     continue;
                 }
 
+                ReleaseVfx(instance);
                 _active.RemoveAt(i);
                 if (_owner != null)
                     StatusEvents.ReportExpired(_owner, instance.definition);
                 instance.definition.OnEnded(this);
             }
+        }
+
+        // ---------------------------------------------------------------- looks
+
+        /// <summary>
+        /// Makes the pool a status's effect comes from. **Setup only**: a game calls this for each of
+        /// its statuses while a room is built, so the first burn in a fight takes an effect rather
+        /// than making one. A status whose pool was never warmed simply shows nothing.
+        /// </summary>
+        public static void PrewarmVfx(StatusDefinition definition, int count = 8)
+        {
+            PoolManager pools = PoolManager.Instance;
+            if (pools == null || definition == null || definition.Vfx == null)
+                return;
+
+            string pool = definition.VfxPoolName;
+            if (!pools.HasPool(pool))
+                pools.CreatePool(pool, definition.Vfx, new PoolConfig(count, count * 4, grow: 4, autoGrow: true));
+        }
+
+        /// <summary>
+        /// Keeps every status's effect on the victim: taken from the pool when one is missing, placed
+        /// on the body at its height and drawn just in front of it, and handed back when the victim
+        /// dies. Presentation reads the list and never decides what is on the body.
+        /// </summary>
+        void LateUpdate()
+        {
+            if (!Application.isPlaying || _owner == null || _active.Count == 0)
+                return;
+
+            bool dead = _owner.IsDead;
+            Vector2 at = _owner.Position;
+            float height = _owner.Z;
+            int order = _ownerSorting != null ? _ownerSorting.sortingOrder + 1 : 0;
+
+            for (int i = 0; i < _active.Count; i++)
+            {
+                StatusInstance instance = _active[i];
+                if (instance.definition == null || instance.definition.Vfx == null)
+                    continue;
+
+                if (dead)
+                {
+                    if (instance.vfx != null)
+                    {
+                        ReleaseVfx(instance);
+                        instance.vfx = null;
+                        instance.vfxSorting = null;
+                        _active[i] = instance;
+                    }
+
+                    continue;
+                }
+
+                if (instance.vfx == null && !TryAcquireVfx(ref instance))
+                    continue;
+
+                Vector2 offset = instance.definition.VfxOffset;
+                instance.vfx.transform.position = new Vector3(
+                    Mathf.Round(at.x + offset.x),
+                    Mathf.Round(at.y + height + offset.y),
+                    0f
+                );
+
+                if (instance.vfxSorting != null)
+                    instance.vfxSorting.sortingOrder = order;
+
+                _active[i] = instance;
+            }
+        }
+
+        // A disabled body is either going back to its pool or sitting out a room change; either way its
+        // effects go back now and are taken again if it returns still afflicted.
+        void OnDisable()
+        {
+            for (int i = 0; i < _active.Count; i++)
+            {
+                StatusInstance instance = _active[i];
+                if (instance.vfx == null)
+                    continue;
+
+                ReleaseVfx(instance);
+                instance.vfx = null;
+                instance.vfxSorting = null;
+                _active[i] = instance;
+            }
+        }
+
+        bool TryAcquireVfx(ref StatusInstance instance)
+        {
+            PoolManager pools = PoolManager.Instance;
+            string pool = instance.definition.VfxPoolName;
+            if (pools == null || !pools.HasPool(pool))
+                return false;
+
+            GameObject go = pools.Acquire(pool, _owner.Position);
+            if (go == null)
+                return false;
+
+            instance.vfx = go;
+
+            // Once per effect taken, when a status starts showing. Never per frame.
+            instance.vfxSorting = go.GetComponent<SortingGroup>();
+            return true;
+        }
+
+        static void ReleaseVfx(in StatusInstance instance)
+        {
+            if (instance.vfx == null || PoolManager.Instance == null)
+                return;
+
+            PoolManager.Instance.Release(instance.vfx);
         }
 
         void TickCooldowns(float dt)
