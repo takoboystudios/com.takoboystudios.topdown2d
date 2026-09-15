@@ -142,6 +142,13 @@ namespace TakoBoyStudios.TopDown2D
         // ----------------------------
         // Input feeding API (player or AI)
         // ----------------------------
+        /// <summary>Stop rising because the head hit something. See <see cref="TopDownMotor2D.Bonk"/>.</summary>
+        public void BonkHead()
+        {
+            if (motor != null)
+                motor.Bonk();
+        }
+
         public void SetMoveDirection(Vector2 input)
         {
             m_moveInput = input;

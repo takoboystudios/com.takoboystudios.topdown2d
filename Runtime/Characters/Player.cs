@@ -38,9 +38,20 @@ namespace TakoBoyStudios.TopDown2D
         float jumpFlightTime = 0.55f;
 
         [BoxGroup("Jump")]
-        [Tooltip("Apex height of the jump, in pixels (fake-Z). ~12 reads as clearly airborne without ballooning the sprite.")]
+        [Tooltip("Apex height of the jump, in pixels (fake-Z). Grim's is 32.")]
         [SerializeField, MinValue(0f)]
         float jumpPeakHeight = 12f;
+
+        [BoxGroup("Jump")]
+        [Tooltip(
+            "Where the top of the head is drawn, in pixels above the player's position, standing. What a "
+            + "jump bumps into things above it with, such as a Perk bubble. Grim's art tops out around 10."
+        )]
+        [SerializeField, MinValue(0f)]
+        float headHeight = 10f;
+
+        /// <summary>The top of the head above the player's position while standing, in pixels. Add Z for the head in the air.</summary>
+        public float HeadHeight => headHeight;
 
         [BoxGroup("Jump")]
         [Tooltip("Top horizontal speed while steering in the air, in u/s. ~100 (normal move speed): the jump is evasion, not a burst dash.")]

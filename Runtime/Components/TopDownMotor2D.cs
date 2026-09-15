@@ -378,6 +378,17 @@ namespace TakoBoyStudios.TopDown2D
             _usingArcGravity = false;
             _hovering = false;
         }
+
+        /// <summary>
+        /// The head hit something above it: stop rising at once and fall from here, under whatever
+        /// gravity the jump or arc was already using. Nothing happens on the way down, so a bump can
+        /// only ever shorten a rise, never add to a fall.
+        /// </summary>
+        public void Bonk()
+        {
+            if (_verticalVelocity > 0f)
+                _verticalVelocity = 0f;
+        }
         #endregion
 
         #region Movement: Vertical (Jump)

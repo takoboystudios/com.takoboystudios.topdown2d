@@ -335,6 +335,27 @@ namespace TakoBoyStudios.TopDown2D
         /// pushes against does not. A hitbox already parented under the lifted visual moves on its own,
         /// so it is left alone here.
         /// </summary>
+        /// <summary>
+        /// The hitbox that is the body: the first one that rises with the height rather than riding
+        /// the sprite. Null when there is none. Allocates nothing.
+        /// </summary>
+        public Hitbox2D BodyHitbox
+        {
+            get
+            {
+                if (m_hitboxes == null)
+                    return null;
+
+                for (int i = 0; i < m_hitboxes.Count; i++)
+                {
+                    if (m_hitboxes[i] != null)
+                        return m_hitboxes[i];
+                }
+
+                return null;
+            }
+        }
+
         void LiftHitboxes(float height)
         {
             if (m_hitboxes == null || m_hitboxes.Count == 0)
