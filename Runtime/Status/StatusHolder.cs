@@ -220,7 +220,6 @@ namespace TakoBoyStudios.TopDown2D.Status
             if (index < 0)
                 return;
 
-            ReleaseVfx(_active[index]);
             _active.RemoveAt(index);
             if (_owner != null)
                 StatusEvents.ReportExpired(_owner, definition);
@@ -232,7 +231,6 @@ namespace TakoBoyStudios.TopDown2D.Status
             for (int i = _active.Count - 1; i >= 0; i--)
             {
                 StatusDefinition definition = _active[i].definition;
-                ReleaseVfx(_active[i]);
                 _active.RemoveAt(i);
 
                 if (silent)
@@ -393,7 +391,6 @@ namespace TakoBoyStudios.TopDown2D.Status
                     continue;
                 }
 
-                ReleaseVfx(instance);
                 _active.RemoveAt(i);
                 if (_owner != null)
                     StatusEvents.ReportExpired(_owner, instance.definition);
@@ -404,11 +401,11 @@ namespace TakoBoyStudios.TopDown2D.Status
         // ---------------------------------------------------------------- looks
 
         /// <summary>
-        /// Makes the pool a status's effect comes from. **Setup only**: a game calls this for each of
-        /// its statuses while a room is built, so the first burn in a fight takes an effect rather
-        /// than making one. A status whose pool was never warmed simply shows nothing.
+        /// Makes the pool a status's particles come from. **Setup only**: a game calls this for each of
+        /// its statuses while a room is built, so the first burn in a fight takes particles rather than
+        /// making them. A status whose pool was never warmed simply shows nothing.
         /// </summary>
-        public static void PrewarmVfx(StatusDefinition definition, int count = 8)
+        public static void PrewarmVfx(StatusDefinition definition, int count = 16)
         {
             PoolManager pools = PoolManager.Instance;
             if (pools == null || definition == null || definition.Vfx == null)
@@ -416,20 +413,32 @@ namespace TakoBoyStudios.TopDown2D.Status
 
             string pool = definition.VfxPoolName;
             if (!pools.HasPool(pool))
-                pools.CreatePool(pool, definition.Vfx, new PoolConfig(count, count * 4, grow: 4, autoGrow: true));
+                pools.CreatePool(pool, definition.Vfx, new PoolConfig(count, count * 4, grow: 8, autoGrow: true));
         }
 
         /// <summary>
-        /// Keeps every status's effect on the victim: taken from the pool when one is missing, placed
-        /// on the body at its height and drawn just in front of it, and handed back when the victim
-        /// dies. Presentation reads the list and never decides what is on the body.
+        /// Each particle's sorting group by instance id, looked up the first time that pooled particle is
+        /// used and never again. The pool reuses a fixed set, so this stops growing after the first
+        /// cycle; sized up front so it rarely grows at all.
+        /// </summary>
+        static readonly Dictionary<int, SortingGroup> _particleSorting = new Dictionary<int, SortingGroup>(128);
+
+        /// <summary>
+        /// Pops each status's particles on the victim, like a particle system: every interval a one-shot
+        /// effect is taken from the pool at a random whole pixel in the status's area, drawn just in front
+        /// of the victim, and left to play out and release itself. Nothing follows the body and nothing
+        /// needs handing back, so a death or a status ending simply stops new ones appearing.
         /// </summary>
         void LateUpdate()
         {
-            if (!Application.isPlaying || _owner == null || _active.Count == 0)
+            if (!Application.isPlaying || _owner == null || _active.Count == 0 || _owner.IsDead)
                 return;
 
-            bool dead = _owner.IsDead;
+            PoolManager pools = PoolManager.Instance;
+            if (pools == null)
+                return;
+
+            float dt = Time.deltaTime;
             Vector2 at = _owner.Position;
             float height = _owner.Z;
             int order = _ownerSorting != null ? _ownerSorting.sortingOrder + 1 : 0;
@@ -437,80 +446,51 @@ namespace TakoBoyStudios.TopDown2D.Status
             for (int i = 0; i < _active.Count; i++)
             {
                 StatusInstance instance = _active[i];
-                if (instance.definition == null || instance.definition.Vfx == null)
+                StatusDefinition definition = instance.definition;
+                if (definition == null || definition.Vfx == null)
                     continue;
 
-                if (dead)
+                instance.vfxTimer -= dt;
+                if (instance.vfxTimer <= 0f)
                 {
-                    if (instance.vfx != null)
-                    {
-                        ReleaseVfx(instance);
-                        instance.vfx = null;
-                        instance.vfxSorting = null;
-                        _active[i] = instance;
-                    }
+                    instance.vfxTimer += definition.VfxInterval;
+                    if (instance.vfxTimer < 0f)
+                        instance.vfxTimer = definition.VfxInterval;
 
-                    continue;
+                    SpawnParticle(pools, definition, at, height, order);
                 }
 
-                if (instance.vfx == null && !TryAcquireVfx(ref instance))
-                    continue;
-
-                Vector2 offset = instance.definition.VfxOffset;
-                instance.vfx.transform.position = new Vector3(
-                    Mathf.Round(at.x + offset.x),
-                    Mathf.Round(at.y + height + offset.y),
-                    0f
-                );
-
-                if (instance.vfxSorting != null)
-                    instance.vfxSorting.sortingOrder = order;
-
                 _active[i] = instance;
             }
         }
 
-        // A disabled body is either going back to its pool or sitting out a room change; either way its
-        // effects go back now and are taken again if it returns still afflicted.
-        void OnDisable()
+        static void SpawnParticle(PoolManager pools, StatusDefinition definition, Vector2 at, float height, int order)
         {
-            for (int i = 0; i < _active.Count; i++)
-            {
-                StatusInstance instance = _active[i];
-                if (instance.vfx == null)
-                    continue;
-
-                ReleaseVfx(instance);
-                instance.vfx = null;
-                instance.vfxSorting = null;
-                _active[i] = instance;
-            }
-        }
-
-        bool TryAcquireVfx(ref StatusInstance instance)
-        {
-            PoolManager pools = PoolManager.Instance;
-            string pool = instance.definition.VfxPoolName;
-            if (pools == null || !pools.HasPool(pool))
-                return false;
-
-            GameObject go = pools.Acquire(pool, _owner.Position);
-            if (go == null)
-                return false;
-
-            instance.vfx = go;
-
-            // Once per effect taken, when a status starts showing. Never per frame.
-            instance.vfxSorting = go.GetComponent<SortingGroup>();
-            return true;
-        }
-
-        static void ReleaseVfx(in StatusInstance instance)
-        {
-            if (instance.vfx == null || PoolManager.Instance == null)
+            string pool = definition.VfxPoolName;
+            if (!pools.HasPool(pool))
                 return;
 
-            PoolManager.Instance.Release(instance.vfx);
+            Vector2 centre = definition.VfxOffset;
+            Vector2 half = definition.VfxArea * 0.5f;
+            Vector3 position = new Vector3(
+                Mathf.Round(at.x + centre.x + Random.Range(-half.x, half.x)),
+                Mathf.Round(at.y + height + centre.y + Random.Range(-half.y, half.y)),
+                0f
+            );
+
+            GameObject particle = pools.Acquire(pool, position);
+            if (particle == null)
+                return;
+
+            int id = particle.GetInstanceID();
+            if (!_particleSorting.TryGetValue(id, out SortingGroup sorting))
+            {
+                sorting = particle.GetComponent<SortingGroup>();
+                _particleSorting[id] = sorting;
+            }
+
+            if (sorting != null)
+                sorting.sortingOrder = order;
         }
 
         void TickCooldowns(float dt)

@@ -82,14 +82,23 @@ namespace TakoBoyStudios.TopDown2D.Status
 
         [BoxGroup("Look")]
         [Tooltip(
-            "Effect shown on the victim while this is on, taken from the pool and released when it ends. "
-                + "Use an Effect prefab with Stays Until Released ticked. Empty for none."
+            "A one-shot particle popped on the victim over and over while this is on, like a particle "
+                + "system: an Effect prefab whose animation plays out and releases itself (a flame that "
+                + "burns down to smoke, a snowflake that fades out). Empty for none."
         )]
         [SerializeField] GameObject vfx;
 
         [BoxGroup("Look")]
-        [Tooltip("Where the effect sits, in pixels from the victim's position, before their height is added. Around (0, 6) sits on a 16px body.")]
+        [Tooltip("Centre of the area particles pop in, in pixels from the victim's position, before their height is added. Around (0, 6) centres it on a 16px body.")]
         [SerializeField] Vector2 vfxOffset = new Vector2(0f, 6f);
+
+        [BoxGroup("Look")]
+        [Tooltip("Width and height of that area, in pixels. Each particle lands on a random whole pixel inside it. Around 12 by 14 covers a 16px body.")]
+        [SerializeField] Vector2 vfxArea = new Vector2(12f, 14f);
+
+        [BoxGroup("Look")]
+        [Tooltip("Seconds between particles. Lower is busier. Around 0.2; keep it longer than a particle's own animation if they should not overlap.")]
+        [SerializeField, Min(0.02f)] float vfxInterval = 0.2f;
 
         public string Id => id;
         public string DisplayNameId => displayNameId;
@@ -102,8 +111,14 @@ namespace TakoBoyStudios.TopDown2D.Status
         /// <summary>The effect shown on a victim, or null.</summary>
         public GameObject Vfx => vfx;
 
-        /// <summary>Where the effect sits on the victim, before their height.</summary>
+        /// <summary>Centre of the area particles pop in, before the victim's height.</summary>
         public Vector2 VfxOffset => vfxOffset;
+
+        /// <summary>Size of the area particles pop in.</summary>
+        public Vector2 VfxArea => vfxArea;
+
+        /// <summary>Seconds between particles.</summary>
+        public float VfxInterval => Mathf.Max(0.02f, vfxInterval);
 
         [System.NonSerialized] string _vfxPoolName;
 
@@ -168,11 +183,8 @@ namespace TakoBoyStudios.TopDown2D.Status
         /// <summary>Fractional damage carried between frames, so damage over time is honest on an int health pool.</summary>
         public float damageCarry;
 
-        /// <summary>The effect showing this on the victim, or null. Owned by the holder, which acquires and releases it.</summary>
-        public GameObject vfx;
-
-        /// <summary>The effect's sorting group, cached when it was acquired so it can be kept in front of the victim.</summary>
-        public UnityEngine.Rendering.SortingGroup vfxSorting;
+        /// <summary>Seconds until the next particle pops. Zero when it lands, so one shows at once.</summary>
+        public float vfxTimer;
 
         public bool IsActive => definition != null && stacks > 0;
     }
