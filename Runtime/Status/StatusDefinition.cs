@@ -100,6 +100,23 @@ namespace TakoBoyStudios.TopDown2D.Status
         [Tooltip("Seconds between particles. Lower is busier. Around 0.2; keep it longer than a particle's own animation if they should not overlap.")]
         [SerializeField, Min(0.02f)] float vfxInterval = 0.2f;
 
+        [BoxGroup("Look")]
+        [Tooltip(
+            "On to step the victim's main colour toward Swap Target and back while this is on, the way "
+                + "Grim's purple goes to red while he burns. Only that one colour changes. Each body's main "
+                + "colour is set on its prefab. With two such statuses on, the loops take turns."
+        )]
+        [SerializeField] bool swapsMainColour;
+
+        [BoxGroup("Look")]
+        [ShowIf("swapsMainColour")]
+        [Tooltip("The colour the main colour steps toward. Burn is red (227, 49, 49); Chill is the frozen art's cyan (2, 218, 216).")]
+        [SerializeField] Color swapTarget = new Color(0.8901961f, 0.19215687f, 0.19215687f, 1f);
+
+        [BoxGroup("Look")]
+        [Tooltip("An animation the victim holds while this is on, standing still and doing nothing else. 'frozen' for Frozen. Empty for none.")]
+        [SerializeField] string holdAnimation;
+
         public string Id => id;
         public string DisplayNameId => displayNameId;
         public StatusRefresh Refresh => refresh;
@@ -116,6 +133,15 @@ namespace TakoBoyStudios.TopDown2D.Status
 
         /// <summary>Size of the area particles pop in.</summary>
         public Vector2 VfxArea => vfxArea;
+
+        /// <summary>True when this recolours the victim's main colour while it is on.</summary>
+        public bool SwapsMainColour => swapsMainColour;
+
+        /// <summary>The colour the main colour steps toward.</summary>
+        public Color SwapTarget => swapTarget;
+
+        /// <summary>The clip the victim holds while this is on, or empty.</summary>
+        public string HoldAnimation => holdAnimation;
 
         /// <summary>Seconds between particles.</summary>
         public float VfxInterval => Mathf.Max(0.02f, vfxInterval);

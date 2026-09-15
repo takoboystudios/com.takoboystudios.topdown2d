@@ -33,6 +33,9 @@ namespace TakoBoyStudios.TopDown2D
 
         static readonly int FlashPaletteId = Shader.PropertyToID("_FlashPalette");
         static readonly int FlashOverlayId = Shader.PropertyToID("_FlashOverlay");
+        static readonly int SwapOnId = Shader.PropertyToID("_SwapOn");
+        static readonly int SwapFromId = Shader.PropertyToID("_SwapFrom");
+        static readonly int SwapToId = Shader.PropertyToID("_SwapTo");
 
         /// <summary>
         /// A soft white overlay instead of Grim's amber/red hurt palette. A barrel or crate is not
@@ -55,6 +58,11 @@ namespace TakoBoyStudios.TopDown2D
         bool _flashing;
         float _written = -1f;
         float _writtenOverlay = -1f;
+
+        bool _swapWritten;
+        bool _swapOn;
+        Color _swapFrom;
+        Color _swapTo;
 
         public bool IsFlashing => _flashing;
 
@@ -86,6 +94,8 @@ namespace TakoBoyStudios.TopDown2D
             // A body rebound mid-flash would otherwise keep the last value it was left on.
             _written = -1f;
             _writtenOverlay = -1f;
+            _swapWritten = false;
+            SetSwap(false, default, default);
             if (WhiteFlash)
                 WriteOverlay(0f);
             else
@@ -140,6 +150,40 @@ namespace TakoBoyStudios.TopDown2D
             // Alternate the two palettes every frame. That alternation is the whole effect: a single
             // held colour reads as a tint, two swapping colours read as a hit.
             Write(frame % 2 == 0 ? 1f : 2f);
+        }
+
+        /// <summary>
+        /// Recolours the body's main colour to <paramref name="to"/>, or stops. Called every frame by
+        /// whoever owns the flash with the status colour for this instant; it only touches the renderers
+        /// when the answer changed, so a burning enemy writes four times a loop, not sixty times a second.
+        /// </summary>
+        public void SetSwap(bool on, Color from, Color to)
+        {
+            if (_renderers.Count == 0)
+                return;
+
+            if (_swapWritten && on == _swapOn && (!on || (from == _swapFrom && to == _swapTo)))
+                return;
+
+            _swapWritten = true;
+            _swapOn = on;
+            _swapFrom = from;
+            _swapTo = to;
+
+            _block ??= new MaterialPropertyBlock();
+
+            for (int i = 0; i < _renderers.Count; i++)
+            {
+                SpriteRenderer renderer = _renderers[i];
+                if (renderer == null)
+                    continue;
+
+                renderer.GetPropertyBlock(_block);
+                _block.SetFloat(SwapOnId, on ? 1f : 0f);
+                _block.SetColor(SwapFromId, from);
+                _block.SetColor(SwapToId, to);
+                renderer.SetPropertyBlock(_block);
+            }
         }
 
         void Write(float palette)

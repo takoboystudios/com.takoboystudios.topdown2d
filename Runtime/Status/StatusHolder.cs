@@ -493,6 +493,88 @@ namespace TakoBoyStudios.TopDown2D.Status
                 sorting.sortingOrder = order;
         }
 
+        /// <summary>
+        /// The main colour's steps toward a status colour, one per 60ms frame, read out of the owner's
+        /// reference gif: base, three steps up, the target held for two frames, three steps down, and
+        /// the base held for three. 0 is the body's own colour and 4 is the target.
+        /// </summary>
+        static readonly int[] SwapSteps = { 0, 1, 2, 3, 4, 4, 3, 2, 1, 0, 0, 0 };
+
+        const int SwapStepCount = 4;
+        const float SwapFrameSeconds = 0.06f;
+
+        /// <summary>
+        /// The colour a body's main colour should be right now, or false when no recolouring status is
+        /// on. With more than one, each full loop belongs to the next in the order they landed, so Burn
+        /// and Chill take turns. Allocates nothing.
+        /// </summary>
+        public bool TryGetSwapColour(Color main, float time, out Color colour)
+        {
+            colour = main;
+
+            int count = 0;
+            for (int i = 0; i < _active.Count; i++)
+            {
+                if (_active[i].definition != null && _active[i].definition.SwapsMainColour)
+                    count++;
+            }
+
+            if (count == 0)
+                return false;
+
+            float cycle = SwapSteps.Length * SwapFrameSeconds;
+            int loop = Mathf.FloorToInt(time / cycle);
+            int pick = ((loop % count) + count) % count;
+
+            StatusDefinition chosen = null;
+            int seen = 0;
+            for (int i = 0; i < _active.Count; i++)
+            {
+                StatusDefinition definition = _active[i].definition;
+                if (definition == null || !definition.SwapsMainColour)
+                    continue;
+
+                if (seen == pick)
+                {
+                    chosen = definition;
+                    break;
+                }
+
+                seen++;
+            }
+
+            if (chosen == null)
+                return false;
+
+            int frame = Mathf.Clamp(Mathf.FloorToInt((time - loop * cycle) / SwapFrameSeconds), 0, SwapSteps.Length - 1);
+            float t = SwapSteps[frame] / (float)SwapStepCount;
+            Color target = chosen.SwapTarget;
+
+            colour = new Color(Step(main.r, target.r, t), Step(main.g, target.g, t), Step(main.b, target.b, t), 1f);
+            return true;
+        }
+
+        /// <summary>A whole 0-255 value between two, rounded down, which is how the reference gif's in-between colours were made.</summary>
+        static float Step(float from, float to, float t) =>
+            Mathf.Floor((from + (to - from) * t) * 255f + 0.001f) / 255f;
+
+        /// <summary>The clip a status wants the body to hold, like Frozen's 'frozen', or false for none.</summary>
+        public bool TryGetHoldAnimation(out string clip)
+        {
+            for (int i = 0; i < _active.Count; i++)
+            {
+                StatusDefinition definition = _active[i].definition;
+                if (definition != null && !string.IsNullOrEmpty(definition.HoldAnimation))
+                {
+                    clip = definition.HoldAnimation;
+                    return true;
+                }
+            }
+
+            clip = null;
+            return false;
+        }
+
         void TickCooldowns(float dt)
         {
             if (_cooldowns.Count == 0)

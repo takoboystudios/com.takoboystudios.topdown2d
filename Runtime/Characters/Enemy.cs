@@ -200,6 +200,7 @@ namespace TakoBoyStudios.TopDown2D
             // Outside base.Tick because the flash has to keep running through hit lag and death: a
             // killing blow should still flash, and hit lag is exactly when the player is looking.
             _hitFlash.Tick(deltaTime);
+            UpdateStatusLook();
 
             if (!base.Tick(deltaTime))
                 return false;
@@ -218,7 +219,40 @@ namespace TakoBoyStudios.TopDown2D
                 return true;
             }
 
+            // A status that holds the body (Frozen) stops it acting at all and plays its clip. It is
+            // checked after the combat gate, so a frozen enemy outside its encounter still just waits.
+            if (HeldByStatus())
+                return true;
+
             UpdateEnemy(deltaTime);
+            return true;
+        }
+
+        /// <summary>
+        /// Steps the body's main colour toward whatever recolouring status is on, through the same
+        /// material the hit flash uses, and back to normal when none is. Every frame, but the flash only
+        /// touches the renderers when the colour actually changed.
+        /// </summary>
+        void UpdateStatusLook()
+        {
+            Status.StatusHolder statuses = Statuses;
+            Color main = m_mainColour;
+
+            if (statuses != null && main.a > 0f && !IsDead && statuses.TryGetSwapColour(main, Time.time, out Color swap))
+                _hitFlash.SetSwap(true, main, swap);
+            else
+                _hitFlash.SetSwap(false, main, main);
+        }
+
+        /// <summary>True, having stopped the body and put the clip on, while a status holds it still.</summary>
+        bool HeldByStatus()
+        {
+            Status.StatusHolder statuses = Statuses;
+            if (statuses == null || !statuses.TryGetHoldAnimation(out string clip))
+                return false;
+
+            StopMoving();
+            PlayDirectional(clip);
             return true;
         }
 

@@ -58,6 +58,17 @@ namespace TakoBoyStudios.TopDown2D
         [Tooltip("Elemental type")]
         protected Element m_element = Element.None;
 
+        [BoxGroup("Instance Properties")]
+        [SerializeField]
+        [Tooltip(
+            "The body's main colour, exactly as drawn: the one a status recolours (Grim's purple steps to "
+                + "red while he burns). Leave it clear, alpha 0, for a body with nothing to recolour."
+        )]
+        protected Color m_mainColour = new Color(0f, 0f, 0f, 0f);
+
+        /// <summary>The colour a status recolours. Alpha 0 means none.</summary>
+        public Color MainColour => m_mainColour;
+
         // Components
         [BoxGroup("Components")]
         public Transform character; // visual root that will be lifted by motor.Height
