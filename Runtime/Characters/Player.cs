@@ -1049,6 +1049,10 @@ namespace TakoBoyStudios.TopDown2D
                 return;
 
             bomb.Init();
+
+            // Credited to the thrower, so its blast and shrapnel count as this player's hits. Enemies
+            // already stamp theirs; the player's throw was the one that did not.
+            bomb.Instigator = this;
             bomb.Position = Position;
             bomb.Lob((Vector2)Position + _throwDirection.normalized * throwDistance);
 

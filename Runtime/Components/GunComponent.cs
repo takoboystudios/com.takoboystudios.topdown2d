@@ -77,9 +77,25 @@ namespace TakoBoyStudios.TopDown2D
 
         float _fireTimer;
 
+        /// <summary>
+        /// Who fires this gun, found once at setup. Stamped on every bullet as its Instigator, so a hit
+        /// is credited to the shooter rather than to the bullet: Perks, Relics, kill credit and scoring
+        /// all follow the Instigator back to a player, and a bullet with none belongs to nobody.
+        /// </summary>
+        Entity _shooter;
+
+        protected override void Awake()
+        {
+            base.Awake();
+            _shooter = GetComponentInParent<Entity>();
+        }
+
         public override void Init(Entity e)
         {
             base.Init(e);
+
+            if (e != null)
+                _shooter = e;
 
             if (PoolManager.Instance)
                 PoolManager.Instance.CreatePool(bulletPrefab.gameObject, bulletPoolSize);
@@ -111,6 +127,9 @@ namespace TakoBoyStudios.TopDown2D
             );
             Projectile bullet = bulletObject.GetComponent<Projectile>();
             bullet.transform.position = selectedMuzzle.position;
+
+            // After Acquire, because a pooled body clears its Instigator when it is handed out.
+            bullet.Instigator = _shooter;
             bullet.Shoot(finalDirection);
 
             // Camera shake on shoot
