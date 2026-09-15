@@ -43,9 +43,18 @@ namespace TakoBoyStudios.TopDown2D
         float jumpPeakHeight = 12f;
 
         [BoxGroup("Jump")]
-        [Tooltip("Horizontal speed carried through the jump, in u/s. Committed on takeoff. ~100 (normal move speed): the jump is evasion, not a burst dash.")]
+        [Tooltip("Top horizontal speed while steering in the air, in u/s. ~100 (normal move speed): the jump is evasion, not a burst dash.")]
         [SerializeField, MinValue(0f)]
         float jumpMoveSpeed = 100f;
+
+        [BoxGroup("Jump")]
+        [Tooltip(
+            "How quickly the stick changes the jump's horizontal speed, in u/s per second. The jump leaves the "
+            + "ground with none, so this is also how fast it gets going. ~600 reaches full speed in about a "
+            + "sixth of a second; higher is snappier, lower drifts more."
+        )]
+        [SerializeField, MinValue(0f)]
+        float airAcceleration = 600f;
 
         [BoxGroup("Jump")]
         [Tooltip("How long a jump press is remembered so a press just before landing fires on touchdown. ~0.10s.")]
@@ -554,9 +563,8 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>
         /// Starts a throw on the press, aimed where the player is aiming.
         ///
-        /// Aim, not movement, and that is the opposite of the jump on purpose. The jump commits to where
-        /// you are going; the throw commits to where you are pointing, so a player can back away from a
-        /// fight and still put a bomb into it. Falls back to the last facing when nothing is held, so a
+        /// Aim, not movement, on purpose: the throw commits to where you are pointing, so a player can
+        /// back away from a fight and still put a bomb into it. Falls back to the last facing when nothing is held, so a
         /// standing player throws where they are looking rather than nowhere.
         /// </summary>
         void HandleThrowInput()
@@ -584,16 +592,21 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         /// <summary>
-        /// The combat jump. Direction is chosen and locked on takeoff (movement, never aim), the height
-        /// arc is data-driven via the motor, horizontal speed is committed, and shooting is off for the
-        /// whole airtime. Defense comes purely from the height/attack relationship, not i-frames: the
-        /// player is never SetInvincible here.
+        /// The combat jump. **It leaves the ground straight up and the player steers it in the air**
+        /// (owner, 2026-09-14): horizontal speed starts at zero and follows the move stick, eased by
+        /// <see cref="airAcceleration"/> up to <see cref="jumpMoveSpeed"/>. The height arc is the
+        /// motor's, and shooting is off for the whole airtime. Defense comes purely from the
+        /// height/attack relationship, not i-frames: the player is never SetInvincible here.
+        ///
+        /// It used to lock the stick's direction and speed on takeoff. That read as being thrown
+        /// somewhere rather than jumping.
         /// </summary>
         void StateJump(Fsm.StateStep step, float deltaTime)
         {
             switch (step)
             {
                 case Fsm.StateStep.Enter:
+                    // Only which way the leap pose faces. Nothing about where the body goes.
                     _jumpDirection =
                         m_moveInput.sqrMagnitude > 0.001f ? m_moveInput.normalized : m_lastMoveDirection;
                     if (_jumpDirection.sqrMagnitude < 0.001f)
@@ -601,8 +614,9 @@ namespace TakoBoyStudios.TopDown2D
 
                     _jumpBufferTimer = 0f;
                     _airborne = false;
+                    _airVelocity = Vector2.zero;
+                    SetMoveDirection(Vector2.zero);
 
-                    CommitJumpVelocity();
                     if (motor != null)
                         motor.LaunchArc(jumpPeakHeight, jumpFlightTime);
 
@@ -611,8 +625,7 @@ namespace TakoBoyStudios.TopDown2D
                     break;
 
                 case Fsm.StateStep.Update:
-                    // Locked trajectory: no steering, no aim influence.
-                    CommitJumpVelocity();
+                    SteerInAir(deltaTime);
 
                     if (!Grounded)
                         _airborne = true;
@@ -621,16 +634,26 @@ namespace TakoBoyStudios.TopDown2D
                     break;
 
                 case Fsm.StateStep.Exit:
+                    _airVelocity = Vector2.zero;
                     SetMoveDirection(Vector2.zero);
                     break;
             }
         }
 
-        void CommitJumpVelocity()
+        /// <summary>Horizontal velocity while airborne, in u/s. Eased toward the stick every frame.</summary>
+        Vector2 _airVelocity;
+
+        void SteerInAir(float deltaTime)
         {
-            // Entity applies m_moveInput * m_moveSpeed, so scale so the ground speed equals jumpMoveSpeed.
-            float scale = m_moveSpeed > 0.0001f ? jumpMoveSpeed / m_moveSpeed : 0f;
-            SetMoveDirection(_jumpDirection * scale);
+            Vector2 input = InputLocked || _moveAction == null ? Vector2.zero : _moveAction.ReadValue<Vector2>();
+            if (input.sqrMagnitude > 1f)
+                input.Normalize();
+
+            _airVelocity = Vector2.MoveTowards(_airVelocity, input * jumpMoveSpeed, airAcceleration * deltaTime);
+
+            // Entity applies m_moveInput * m_moveSpeed, so divide it back out to get the velocity asked for.
+            float scale = m_moveSpeed > 0.0001f ? 1f / m_moveSpeed : 0f;
+            SetMoveDirection(_airVelocity * scale);
         }
 
         // -----------------------------
