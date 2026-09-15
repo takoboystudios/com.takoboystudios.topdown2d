@@ -55,7 +55,23 @@ namespace TakoBoyStudios.TopDown2D
         public bool heavy;
 
         /// <summary>Sensible values for a hit that has not been configured, so a new box does something.</summary>
+        /// <summary>
+        /// The damage of one ordinary hit. Every health and damage number outside the player was scaled
+        /// by ten together (owner, 2026-09-15), so a bullet deals 10 to a 40 health enemy exactly as it
+        /// used to deal 1 to a 4, while a status that ticks small numbers (Burn's 2 a second) is ten
+        /// times weaker. Anything that reads a damage number as "how many hits" divides by this.
+        /// </summary>
+        public const int HitDamage = 10;
+
+        /// <summary>
+        /// Health in one of the player's HUD pips (owner, 2026-09-15). Grim has 12, three pips, and a
+        /// health upgrade adds a whole pip. Damage landing on a player is converted from hits to pips
+        /// (see Player.ScaleIncomingDamage), so an ordinary 10 damage hit takes 4, one pip, and a 20
+        /// damage blast takes two, while the same blast still takes 20 off a barrel.
+        /// </summary>
+        public const int PlayerHealthPerPip = 4;
+
         public static DamageValues Default =>
-            new DamageValues { damage = 1, damageType = Element.None, knockback = 60f, shakeIntensity = 0.1f };
+            new DamageValues { damage = HitDamage, damageType = Element.None, knockback = 60f, shakeIntensity = 0.1f };
     }
 }

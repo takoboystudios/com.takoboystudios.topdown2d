@@ -683,6 +683,20 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public Entity LastDamageSource { get; private set; }
 
+        /// <summary>
+        /// Damage arrives in hits (an ordinary one is DamageValues.HitDamage) and the player's health is
+        /// counted in pips of DamageValues.PlayerHealthPerPip, so it is converted: 10 takes 4, 20 takes 8,
+        /// and a Burn tick of 2 takes 1. Anything that does damage takes at least 1, so a small status
+        /// tick is never free.
+        /// </summary>
+        protected override int ScaleIncomingDamage(int damage)
+        {
+            if (damage <= 0)
+                return 0;
+
+            return Mathf.Max(1, Mathf.RoundToInt(damage * (float)DamageValues.PlayerHealthPerPip / DamageValues.HitDamage));
+        }
+
         public override void DealDamage(HitEvent hitEvent)
         {
             if (_invulnTimer > 0f || (m_fsm != null && m_fsm.CurrentState == (int)PlayerState.Damaged))

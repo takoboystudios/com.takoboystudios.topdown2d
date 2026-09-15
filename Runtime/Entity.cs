@@ -552,13 +552,19 @@ namespace TakoBoyStudios.TopDown2D
             }
         }
 
+        /// <summary>
+        /// Converts a hit's damage into this body's own health units. Unchanged for everything except a
+        /// player, whose pips hold fewer points than a hit deals (DamageValues.PlayerHealthPerPip).
+        /// </summary>
+        protected virtual int ScaleIncomingDamage(int damage) => damage;
+
         // Entity.cs - Updated TakeHit method
         public virtual void DealDamage(HitEvent hitEvent)
         {
             DamageInfo info = hitEvent.damageInfo;
 
             // Calculate final damage and knockback
-            int damage = info.GetFinalDamage();
+            int damage = ScaleIncomingDamage(info.GetFinalDamage());
             Vector2 knockback = info.GetFinalKnockback();
 
             // A heavy hit breaks the statuses the game says it breaks, which in Hell Wilds is the

@@ -92,7 +92,7 @@ namespace TakoBoyStudios.TopDown2D
         /// The freeze on both parties at the moment of impact, in frames. Scales with damage so a
         /// bigger hit lands heavier.
         /// </summary>
-        public int GetHitLagFrames() => IsValid ? (int)(GetFinalDamage() * 0.333f + 1f) : 0;
+        public int GetHitLagFrames() => IsValid ? (int)(GetFinalDamage() / (float)DamageValues.HitDamage * 0.333f + 1f) : 0;
 
         /// <summary>How long the victim is locked after the freeze. Follows the shove, not the damage.</summary>
         public int GetHitStunFrames() => IsValid ? (int)(values.knockback * 0.4f) : 0;
