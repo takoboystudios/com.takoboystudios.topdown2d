@@ -161,7 +161,12 @@ namespace TakoBoyStudios.TopDown2D
             {
                 DrawGizmoBox(transform, _collider, GetEditorColor());
             }
+
+            DrawExtraGizmos();
         }
+
+        /// <summary>Anything a box type draws beyond its own box, whenever it is selected. Nothing by default.</summary>
+        protected virtual void DrawExtraGizmos() { }
 
         public static void DrawGizmoBox(Transform transform, Collider2D collider, string color)
         {

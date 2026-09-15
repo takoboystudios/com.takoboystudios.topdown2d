@@ -92,6 +92,31 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, MinValue(0f)]
         float m_groundClearance = 4f;
 
+        [BoxGroup("Walls")]
+        [Tooltip(
+            "On to test walls with a box of its own instead of the damage box. A shot is drawn at the "
+                + "hand but travels over the floor under it, and a wall only stops what is on the floor. "
+                + "Without this, a player flush under a wall who fires sideways starts the shot inside "
+                + "the wall and it dies on its first frame. Off uses the damage box for both."
+        )]
+        [SerializeField]
+        bool separateWallBox;
+
+        [BoxGroup("Walls")]
+        [Tooltip(
+            "Centre of the wall box, in pixels from the shot. Negative y puts it under the drawn shot, "
+                + "down at the shooter's feet: -6 for a shot fired from Grim's hand."
+        )]
+        [SerializeField, ShowIf("separateWallBox")]
+        Vector2 wallBoxCenter = new Vector2(0f, -6f);
+
+        [BoxGroup("Walls")]
+        [Tooltip("Size of the wall box, in pixels. Small and flat: the shot's footprint, not its art. Around 4 by 2.")]
+        [SerializeField, ShowIf("separateWallBox")]
+        Vector2 wallBoxSize = new Vector2(4f, 2f);
+
+        static readonly Color WallBoxColor = new Color(1f, 0.89f, 0.38f, 1f);
+
         // Runtime tracking
         readonly HashSet<Hitbox2D> _alreadyHit = new HashSet<Hitbox2D>();
         readonly List<RaycastHit2D> _collisionResults = new List<RaycastHit2D>(16);
@@ -128,6 +153,19 @@ namespace TakoBoyStudios.TopDown2D
             base.Init(owner);
         }
 
+#if UNITY_EDITOR
+        /// <summary>The wall box, drawn in the Scene view whenever this hurtbox is selected, so it can be authored by eye.</summary>
+        protected override void DrawExtraGizmos()
+        {
+            if (!separateWallBox)
+                return;
+
+            Gizmos.matrix = Matrix4x4.identity;
+            Gizmos.color = WallBoxColor;
+            Gizmos.DrawWireCube((Vector2)transform.position + wallBoxCenter, wallBoxSize);
+        }
+#endif
+
         protected override void Reset()
         {
             base.Reset();
@@ -157,13 +195,20 @@ namespace TakoBoyStudios.TopDown2D
             // Physics2D.queriesStartInColliders is off, which the motor sets globally.
             if (!HasBehavior(DamageBoxBehavior.IgnoreWalls))
             {
+                // The wall test is the shot's footprint on the floor when it has one, never the art.
+                Vector2 wallOrigin = separateWallBox ? startPos + wallBoxCenter : origin;
+                Vector2 wallSize = separateWallBox ? wallBoxSize : (Vector2)Size;
+
+                if (separateWallBox)
+                    DebugDraw.Box(wallOrigin, wallSize, WallBoxColor);
+
                 int walls = EffectiveWallLayers;
-                bool insideWall = Physics2D.OverlapBox(origin, Size, 0f, walls) != null;
+                bool insideWall = Physics2D.OverlapBox(wallOrigin, wallSize, 0f, walls) != null;
                 bool crossingWall =
                     !insideWall
                     && distance > 0.0001f
                     && Physics2D
-                        .BoxCast(origin, Size, 0f, direction, distance, walls)
+                        .BoxCast(wallOrigin, wallSize, 0f, direction, distance, walls)
                         .collider != null;
 
                 if (insideWall || crossingWall)
