@@ -367,9 +367,18 @@ namespace TakoBoyStudios.TopDown2D
 
             Hurtbox2D box = boxes.Get(direction);
 
-            if (box != null)
-                box.CheckArea(box.transform.position);
+            if (box == null)
+                return;
+
+            box.CheckArea(box.transform.position);
+
+            // Draw the swing while it is live, so the overlay shows the frames a hit can land on and
+            // not just the box's resting place (CLAUDE.md, draw what it is thinking).
+            if (DebugDraw.Enabled)
+                DebugDraw.Box(box.transform.position, (Vector2)box.Size, StrikeColor);
         }
+
+        static readonly Color StrikeColor = new Color(1f, 0.3f, 0.2f, 1f);
 
         /// <summary>
         /// Snaps a direction to the nearest cardinal.
