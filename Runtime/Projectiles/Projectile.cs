@@ -35,6 +35,18 @@ namespace TakoBoyStudios.TopDown2D
         )]
         float homingConeAngle = 120f;
 
+        [Header("Art")]
+        [SerializeField]
+        [Tooltip(
+            "Turn the art to face the way the shot flies. For a spear or an arrow drawn pointing one "
+                + "way. Off for a ball or a bomb, which look the same from every side."
+        )]
+        bool rotateArtToDirection;
+
+        [SerializeField]
+        [Tooltip("Which way the art points as drawn, in degrees: 0 is right, 90 is up.")]
+        float artFacingDegrees = 90f;
+
         [Header("Range")]
         [SerializeField, Min(0f)]
         [Tooltip(
@@ -105,6 +117,8 @@ namespace TakoBoyStudios.TopDown2D
             _travelled = 0f;
             if (_baseSpeedKnown)
                 m_moveSpeed = _baseSpeed;
+            if (character != null)
+                character.localRotation = Quaternion.identity;
 
             // A hurtbox remembers what it has already hit and how many targets it has spent, so it
             // cannot hit the same body twice or exceed maxTargets. That memory is per-life: without
@@ -149,6 +163,11 @@ namespace TakoBoyStudios.TopDown2D
             Target = target;
             _spawnGracePeriod = 0.1f; // 100ms grace period to avoid hitting owner
             _travelled = 0f;
+            if (rotateArtToDirection && character != null)
+            {
+                float heading = Mathf.Atan2(_direction.y, _direction.x) * Mathf.Rad2Deg;
+                character.localRotation = Quaternion.Euler(0f, 0f, heading - artFacingDegrees);
+            }
             m_fsm.ChangeState((int)EntityState.Idle);
         }
 
