@@ -526,6 +526,18 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>Current hit points. Read-only, for readouts and death checks.</summary>
         public int Health => m_hp;
 
+        /// <summary>
+        /// Restores health, clamped to the maximum. A rest site or a healing pickup calls this; nothing
+        /// in the damage path does. Does nothing on something already dead, since a corpse that heals
+        /// is a different thing (a revive) and wants deciding on purpose.
+        /// </summary>
+        public void Heal(int amount)
+        {
+            if (amount <= 0 || m_hp <= 0)
+                return;
+            m_hp = Mathf.Min(m_maxHp, m_hp + amount);
+        }
+
         public int MaxHealth => m_maxHp;
 
         /// <summary>
