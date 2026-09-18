@@ -103,6 +103,8 @@ namespace TakoBoyStudios.TopDown2D
             Target = null;
             _spawnGracePeriod = 0f;
             _travelled = 0f;
+            if (_baseSpeedKnown)
+                m_moveSpeed = _baseSpeed;
 
             // A hurtbox remembers what it has already hit and how many targets it has spent, so it
             // cannot hit the same body twice or exceed maxTargets. That memory is per-life: without
@@ -121,6 +123,24 @@ namespace TakoBoyStudios.TopDown2D
             m_moveInput = Vector2.zero;
             Target = null;
         }
+
+        /// <summary>
+        /// Overrides this life's speed, for an enemy that fires a shared prefab at its own pace
+        /// (the Mina test set fires one red shot at several speeds). Restored from the prefab's
+        /// value when the pool hands the projectile out again.
+        /// </summary>
+        public void SetSpeed(float speed)
+        {
+            if (!_baseSpeedKnown)
+            {
+                _baseSpeed = m_moveSpeed;
+                _baseSpeedKnown = true;
+            }
+            m_moveSpeed = speed;
+        }
+
+        float _baseSpeed;
+        bool _baseSpeedKnown;
 
         public void Shoot(Vector3 direction, Transform target = null)
         {
