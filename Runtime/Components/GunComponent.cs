@@ -90,7 +90,9 @@ namespace TakoBoyStudios.TopDown2D
             if (e != null)
                 _shooter = e;
 
-            if (PoolManager.Instance)
+            // A gun with no bullet is a set of muzzle points (the Corvidden's throw hand): nothing
+            // to pool, and the owner fires its own projectile from MuzzleLocal.
+            if (PoolManager.Instance && bulletPrefab != null)
                 PoolManager.Instance.CreatePool(bulletPrefab.gameObject, bulletPoolSize);
         }
 
