@@ -37,43 +37,34 @@ namespace TakoBoyStudios.TopDown2D
         CameraShakePreset shootShake;
 
         [FoldoutGroup("Muzzle")]
+        [Tooltip("Off: one muzzle point. On: a point per compass direction, picked by the shot's heading.")]
         public bool usesDirectionalMuzzle;
 
-        [HideIf("usesDirectionalMuzzle")]
         [FoldoutGroup("Muzzle")]
-        public Transform muzzle;
+        [InfoBox("Muzzle points are edited in the Scene view: select the gun and drag the lettered dots. Whole pixels, with Undo.")]
+        [Tooltip("The single muzzle, in pixels from the gun's transform.")]
+        public Vector2 muzzleOffset;
 
-        [ShowIf("usesDirectionalMuzzle")]
-        [FoldoutGroup("Muzzle")]
-        public Transform northMuzzle;
+        // The eight directional points, in pixels from the gun's transform, compass order from north
+        // clockwise: N NE E SE S SW W NW. Hidden: the Scene handles are the editor for these.
+        [HideInInspector]
+        public Vector2[] muzzleOffsets = new Vector2[8];
 
-        [ShowIf("usesDirectionalMuzzle")]
-        [FoldoutGroup("Muzzle")]
-        public Transform northEastMuzzle;
+        // Which of the eight are authored. An unauthored one falls back (see GetMuzzleForDirection).
+        [HideInInspector]
+        public bool[] muzzleAuthored = new bool[8];
 
-        [ShowIf("usesDirectionalMuzzle")]
-        [FoldoutGroup("Muzzle")]
-        public Transform eastMuzzle;
-
-        [ShowIf("usesDirectionalMuzzle")]
-        [FoldoutGroup("Muzzle")]
-        public Transform southEastMuzzle;
-
-        [ShowIf("usesDirectionalMuzzle")]
-        [FoldoutGroup("Muzzle")]
-        public Transform southMuzzle;
-
-        [ShowIf("usesDirectionalMuzzle")]
-        [FoldoutGroup("Muzzle")]
-        public Transform southWestMuzzle;
-
-        [ShowIf("usesDirectionalMuzzle")]
-        [FoldoutGroup("Muzzle")]
-        public Transform westMuzzle;
-
-        [ShowIf("usesDirectionalMuzzle")]
-        [FoldoutGroup("Muzzle")]
-        public Transform northWestMuzzle;
+        // The old way: one child transform per point. Kept, hidden, so an existing prefab migrates
+        // itself the first time it is touched (MigrateMuzzleTransforms), then these are cleared.
+        [HideInInspector] public Transform muzzle;
+        [HideInInspector] public Transform northMuzzle;
+        [HideInInspector] public Transform northEastMuzzle;
+        [HideInInspector] public Transform eastMuzzle;
+        [HideInInspector] public Transform southEastMuzzle;
+        [HideInInspector] public Transform southMuzzle;
+        [HideInInspector] public Transform southWestMuzzle;
+        [HideInInspector] public Transform westMuzzle;
+        [HideInInspector] public Transform northWestMuzzle;
 
         float _fireTimer;
 
@@ -88,6 +79,8 @@ namespace TakoBoyStudios.TopDown2D
         {
             base.Awake();
             _shooter = GetComponentInParent<Entity>();
+            // A prefab still carrying child-transform muzzles keeps its points; the children go.
+            MigrateMuzzleTransforms(destroyChildren: true);
         }
 
         public override void Init(Entity e)
@@ -109,24 +102,27 @@ namespace TakoBoyStudios.TopDown2D
                 _fireTimer -= Time.deltaTime;
         }
 
-        public void Shoot(Vector2 shootDirection)
+        /// <summary>
+        /// Fires one shot from the muzzle for that direction, or nothing while the fire rate is
+        /// cooling. Returns the shot so a caller can adjust it (a per-thrower speed, say), or null.
+        /// </summary>
+        public Projectile Shoot(Vector2 shootDirection)
         {
             if (_fireTimer > 0)
-                return;
+                return null;
 
             _fireTimer = fireRate;
 
             // Apply spread to shoot direction
             Vector2 finalDirection = ApplySpread(shootDirection);
 
-            Transform selectedMuzzle = GetMuzzleForDirection(shootDirection);
+            Vector3 muzzleWorld = MuzzleWorldPosition(shootDirection);
 
-            GameObject bulletObject = PoolManager.Instance.Acquire(
-                bulletPrefab.name,
-                selectedMuzzle.position
-            );
+            GameObject bulletObject = PoolManager.Instance.Acquire(bulletPrefab.name, muzzleWorld);
+            if (bulletObject == null)
+                return null;
             Projectile bullet = bulletObject.GetComponent<Projectile>();
-            bullet.transform.position = selectedMuzzle.position;
+            bullet.transform.position = muzzleWorld;
 
             // After Acquire, because a pooled body clears its Instigator when it is handed out.
             bullet.Instigator = _shooter;
@@ -137,6 +133,8 @@ namespace TakoBoyStudios.TopDown2D
             {
                 ScreenShake.Request(shootShake);
             }
+
+            return bullet;
         }
 
         Vector2 ApplySpread(Vector2 direction)
@@ -168,30 +166,144 @@ namespace TakoBoyStudios.TopDown2D
             return new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
         }
 
-        Transform GetMuzzleForDirection(Vector2 shootDirection)
+        public static readonly string[] MuzzleNames = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
+
+        /// <summary>Compass index from north clockwise for a heading: N 0, NE 1, E 2 ... NW 7.</summary>
+        public static int CompassIndex(Vector2 direction)
+        {
+            float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
+            return Mathf.RoundToInt(((90f - angle) + 720f) % 360f / 45f) % 8;
+        }
+
+        /// <summary>
+        /// The local muzzle point for a heading. An unauthored diagonal falls back to the cardinal
+        /// beside it, an unauthored cardinal to the single muzzle, so a gun with four points fires
+        /// from somewhere sensible.
+        /// </summary>
+        public Vector2 MuzzleLocal(Vector2 shootDirection)
         {
             if (!usesDirectionalMuzzle)
-                return muzzle;
+                return muzzleOffset;
 
-            float angle = Mathf.Atan2(shootDirection.y, shootDirection.x) * Mathf.Rad2Deg;
-            angle = (angle + 360f) % 360f; // Normalize angle to 0-360
+            EnsureArrays();
+            int index = CompassIndex(shootDirection);
+            if (muzzleAuthored[index])
+                return muzzleOffsets[index];
 
-            if (angle >= 337.5f || angle < 22.5f)
-                return eastMuzzle;
-            else if (angle >= 22.5f && angle < 67.5f)
-                return northEastMuzzle;
-            else if (angle >= 67.5f && angle < 112.5f)
-                return northMuzzle;
-            else if (angle >= 112.5f && angle < 157.5f)
-                return northWestMuzzle;
-            else if (angle >= 157.5f && angle < 202.5f)
-                return westMuzzle;
-            else if (angle >= 202.5f && angle < 247.5f)
-                return southWestMuzzle;
-            else if (angle >= 247.5f && angle < 292.5f)
-                return southMuzzle;
-            else // angle >= 292.5f && angle < 337.5f
-                return southEastMuzzle;
+            if (index % 2 == 1)
+            {
+                bool vertical = Mathf.Abs(shootDirection.y) >= Mathf.Abs(shootDirection.x);
+                int cardinal = vertical ? (shootDirection.y >= 0f ? 0 : 4) : (shootDirection.x >= 0f ? 2 : 6);
+                if (muzzleAuthored[cardinal])
+                    return muzzleOffsets[cardinal];
+            }
+            return muzzleOffset;
         }
+
+        public Vector3 MuzzleWorldPosition(Vector2 shootDirection) =>
+            transform.TransformPoint(MuzzleLocal(shootDirection));
+
+        void EnsureArrays()
+        {
+            if (muzzleOffsets == null || muzzleOffsets.Length != 8)
+                muzzleOffsets = new Vector2[8];
+            if (muzzleAuthored == null || muzzleAuthored.Length != 8)
+                muzzleAuthored = new bool[8];
+        }
+
+        /// <summary>
+        /// Copies the old child-transform muzzles into offsets and drops the transforms. Safe to
+        /// call any time; does nothing once there are no transforms left. Runs on Awake so a
+        /// prefab authored the old way keeps its points, and from the editor so the prefab itself
+        /// is updated and the children removed.
+        /// </summary>
+        public bool MigrateMuzzleTransforms(bool destroyChildren)
+        {
+            EnsureArrays();
+            bool migrated = false;
+            if (muzzle != null)
+            {
+                muzzleOffset = transform.InverseTransformPoint(muzzle.position);
+                if (destroyChildren) DestroyPoint(muzzle);
+                muzzle = null;
+                migrated = true;
+            }
+            Transform[] old = { northMuzzle, northEastMuzzle, eastMuzzle, southEastMuzzle, southMuzzle, southWestMuzzle, westMuzzle, northWestMuzzle };
+            for (int i = 0; i < 8; i++)
+            {
+                if (old[i] == null)
+                    continue;
+                muzzleOffsets[i] = transform.InverseTransformPoint(old[i].position);
+                muzzleAuthored[i] = true;
+                if (destroyChildren) DestroyPoint(old[i]);
+                migrated = true;
+            }
+            northMuzzle = northEastMuzzle = eastMuzzle = southEastMuzzle = southMuzzle = southWestMuzzle = westMuzzle = northWestMuzzle = null;
+            return migrated;
+        }
+
+        void DestroyPoint(Transform point)
+        {
+            if (point == null || point == transform)
+                return;
+            if (Application.isPlaying)
+                Destroy(point.gameObject);
+            else
+                DestroyImmediate(point.gameObject);
+        }
+
+#if UNITY_EDITOR
+        /// <summary>Four cardinal points 8px out, for a gun authored from scratch. Then drag them.</summary>
+        [FoldoutGroup("Muzzle")]
+        [Button("Create Cardinal Muzzles")]
+        void CreateCardinalMuzzles()
+        {
+            UnityEditor.Undo.RecordObject(this, "Create Cardinal Muzzles");
+            EnsureArrays();
+            usesDirectionalMuzzle = true;
+            Vector2[] defaults = { new Vector2(0f, 8f), Vector2.zero, new Vector2(8f, 0f), Vector2.zero, new Vector2(0f, -8f), Vector2.zero, new Vector2(-8f, 0f), Vector2.zero };
+            for (int i = 0; i < 8; i += 2)
+            {
+                if (muzzleAuthored[i])
+                    continue;
+                muzzleOffsets[i] = defaults[i];
+                muzzleAuthored[i] = true;
+            }
+            UnityEditor.EditorUtility.SetDirty(this);
+        }
+
+        static readonly Color[] MuzzleColours =
+        {
+            new Color(0.3f, 1f, 0.4f), new Color(0.6f, 1f, 0.4f), new Color(1f, 0.35f, 0.3f), new Color(1f, 0.6f, 0.3f),
+            new Color(0.4f, 0.6f, 1f), new Color(0.6f, 0.5f, 1f), new Color(1f, 0.9f, 0.3f), new Color(0.8f, 0.9f, 0.4f),
+        };
+
+        public static Color MuzzleColour(int index) => MuzzleColours[index % MuzzleColours.Length];
+
+        /// <summary>Every muzzle as a coloured, lettered dot, so a gun reads at a glance in the Scene view.</summary>
+        void OnDrawGizmos()
+        {
+            if (!usesDirectionalMuzzle)
+            {
+                Vector3 at = transform.TransformPoint(muzzleOffset);
+                Gizmos.color = Color.white;
+                Gizmos.DrawWireSphere(at, 1.5f);
+                UnityEditor.Handles.Label(at + new Vector3(2f, 2f, 0f), "muzzle");
+                return;
+            }
+
+            EnsureArrays();
+            for (int i = 0; i < 8; i++)
+            {
+                if (!muzzleAuthored[i])
+                    continue;
+                Vector3 at = transform.TransformPoint(muzzleOffsets[i]);
+                Gizmos.color = MuzzleColour(i);
+                Gizmos.DrawSphere(at, 1.2f);
+                Gizmos.DrawLine(transform.position, at);
+                UnityEditor.Handles.Label(at + new Vector3(2f, 2f, 0f), MuzzleNames[i]);
+            }
+        }
+#endif
     }
 }
