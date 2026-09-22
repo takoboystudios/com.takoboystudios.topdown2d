@@ -665,6 +665,46 @@ namespace TakoBoyStudios.TopDown2D
             }
         }
 
+        // Whether the legs are currently playing backwards, so a change of direction with the same
+        // clip still restarts it. The sprite animator keeps its own flag but does not expose it.
+        bool _bottomReversed;
+
+        /// <summary>
+        /// Shows the two halves and plays an already-resolved clip on each: the torso on the top
+        /// animator, the legs on the bottom, with the legs optionally played backwards (walking away
+        /// from the aim). The caller resolves the names, so a character with a fixed set of facings
+        /// can pass interned literals and this allocates nothing per frame. A null or missing clip
+        /// leaves that half as it was. False when this animator has no split halves.
+        /// </summary>
+        public bool PlaySplitClips(string topClip, bool topFlipX, string bottomClip, bool bottomFlipX, bool bottomReversed = false)
+        {
+            if (!topAnimator || !bottomAnimator || !CanUseSplitAnimators())
+                return false;
+
+            SwitchToSplit();
+
+            if (topClip != null && topAnimator.HasAnimation(topClip))
+            {
+                if (topAnimator.CurrentAnimationName != topClip)
+                    topAnimator.Play(topClip);
+                if (topAnimator.renderer != null)
+                    topAnimator.renderer.flipX = topFlipX;
+            }
+
+            if (bottomClip != null && bottomAnimator.HasAnimation(bottomClip))
+            {
+                if (bottomAnimator.CurrentAnimationName != bottomClip || _bottomReversed != bottomReversed)
+                {
+                    bottomAnimator.Play(bottomClip, 0, bottomReversed);
+                    _bottomReversed = bottomReversed;
+                }
+                if (bottomAnimator.renderer != null)
+                    bottomAnimator.renderer.flipX = bottomFlipX;
+            }
+
+            return true;
+        }
+
         /// <summary>
         /// Update animation assets (used by editor)
         /// </summary>
@@ -722,6 +762,18 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public bool Play(string animName)
         {
+            // A clip the full body owns plays on the full body, whichever half is showing. A
+            // character that is split while shooting (Grim, T-466) asks for its jump, its hurt pose
+            // or its death by whole name and must get the body back, not have the request handed to
+            // the torso animator because that happened to be the active one.
+            if (fullBodyAnimator && fullBodyAnimator.HasAnimation(animName) && CanSwitchToFullBody())
+            {
+                SwitchToFullBody();
+                if (fullBodyAnimator.renderer != null)
+                    fullBodyAnimator.renderer.flipX = false;
+                return fullBodyAnimator.Play(animName);
+            }
+
             SpriteAnimation active = GetActiveAnimator();
 
             // An exact clip name always wins. This is what makes whole names like "attack-charge-s",
