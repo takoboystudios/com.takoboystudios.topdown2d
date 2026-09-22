@@ -68,6 +68,77 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, MinValue(0f)]
         float airAcceleration = 600f;
 
+        // The walk model (T-460). Shape taken from the reference player's walk: a push-off
+        // acceleration that reaches full speed in ten frames whatever the top speed, a brake that
+        // stops in three, a direction that bends toward the stick and snaps once nearly aligned,
+        // and a reversal that plants (brakes to a stop) before going the other way. The numbers are
+        // fractions of the top speed so a speed tweak keeps the feel.
+        [BoxGroup("Walk")]
+        [Tooltip(
+            "How much of the top walk speed is added per second while the stick is held. With the "
+                + "growth below, 4.3 reaches full speed in about ten frames from a standstill whatever "
+                + "the top speed is. Higher is snappier."
+        )]
+        [SerializeField, MinValue(0f)]
+        float walkAcceleration = 4.31f;
+
+        [BoxGroup("Walk")]
+        [Tooltip(
+            "Proportional growth of the current walk speed per second while accelerating: the speed "
+                + "grows by this fraction of itself each second on top of the flat acceleration. 5 makes "
+                + "the start read as a push off rather than a straight ramp. 0 for a plain linear ramp."
+        )]
+        [SerializeField, MinValue(0f)]
+        float walkGrowth = 5f;
+
+        [BoxGroup("Walk")]
+        [Tooltip(
+            "How much of the top walk speed is shed per second when the stick is released or pushed "
+                + "back against the walk. 18 stops from full speed in about three frames."
+        )]
+        [SerializeField, MinValue(0f)]
+        float walkBrake = 18.1f;
+
+        [BoxGroup("Walk")]
+        [Tooltip(
+            "How fast the walk direction bends toward a new stick direction, per second, doubling as "
+                + "they come into line. 16 turns a right angle in about five frames, and the direction "
+                + "snaps to the stick once within about eleven degrees. A reversal (more than a right "
+                + "angle away) does not bend: it brakes to a stop, then goes the new way."
+        )]
+        [SerializeField, MinValue(0f)]
+        float walkTurnRate = 16f;
+
+        [BoxGroup("Walk")]
+        [Tooltip(
+            "Off, the design pillar: movement is free angle and the stick's magnitude scales the speed. "
+                + "On: the stick is snapped to eight directions, and a stick within about 22 degrees of "
+                + "an axis walks straight along it. Here to be tried against the reference, not the default."
+        )]
+        [SerializeField]
+        bool eightWayMovement;
+
+        /// <summary>Past this dot with the current walk direction the stick is a turn; below it, a reversal.</summary>
+        const float ReversalDot = -0.01f;
+
+        /// <summary>Within this dot of the stick the bending direction snaps to it exactly.</summary>
+        const float TurnSnapDot = 0.98f;
+
+        /// <summary>Eight-way only: a normalised stick component at or above this walks straight along that axis.</summary>
+        const float CardinalBand = 0.925f;
+
+        // The walk in flight: where it is going and how fast, in pixels per second. Fed to the motor
+        // through SetMoveDirection every frame the player is walking.
+        Vector2 _walkDirection = Vector2.down;
+        float _walkSpeed;
+        bool _skidPlayed;
+
+        /// <summary>The walk's current speed along <see cref="WalkDirection"/>, in pixels per second.</summary>
+        public float WalkSpeed => _walkSpeed;
+
+        /// <summary>The direction the walk is currently carrying the player, unit length.</summary>
+        public Vector2 WalkDirection => _walkDirection;
+
         [BoxGroup("Jump")]
         [Tooltip("How long a jump press is remembered so a press just before landing fires on touchdown. ~0.10s.")]
         [SerializeField, MinValue(0f)]
@@ -290,8 +361,20 @@ namespace TakoBoyStudios.TopDown2D
             if (direction.sqrMagnitude < 0.0001f)
                 return;
             m_lastMoveDirection = direction.normalized;
+            ResetWalk();
             SetMoveDirection(Vector2.zero);
             m_moveInput = Vector2.zero;
+        }
+
+        /// <summary>
+        /// Drops the walk to a standstill. Anything that takes the stick away from the walk (a jump, a
+        /// hit, a throw, a room change) calls this, so the next step starts from rest the way the
+        /// first one did rather than at whatever speed the interruption caught it.
+        /// </summary>
+        protected void ResetWalk()
+        {
+            _walkSpeed = 0f;
+            _skidPlayed = false;
         }
 
         /// <summary>The clip the character put on for this throw, so its frames are read and nothing else's.</summary>
@@ -406,6 +489,7 @@ namespace TakoBoyStudios.TopDown2D
             _heldAim = Vector2.zero;
             _jumpBufferTimer = 0f;
             _airborne = false;
+            ResetWalk();
 
             // A walk-in from the room being left must not carry over: it would march the player off
             // their new spot the moment they are placed (seen waking at the tavern, T-372). The new
@@ -674,6 +758,7 @@ namespace TakoBoyStudios.TopDown2D
             switch (step)
             {
                 case Fsm.StateStep.Enter:
+                    ResetWalk();
                     SetMoveDirection(Vector2.zero);
                     m_moveInput = Vector2.zero;
                     _shootDirection = Vector2.zero;
@@ -726,7 +811,7 @@ namespace TakoBoyStudios.TopDown2D
             if (TryStartRevive())
                 return;
 
-            HandleMovementInput();
+            HandleMovementInput(deltaTime);
             HandleAttackInput();
             HandleJumpInput();
             HandleThrowInput();
@@ -843,6 +928,7 @@ namespace TakoBoyStudios.TopDown2D
                     _jumpBufferTimer = 0f;
                     _airborne = false;
                     _airVelocity = Vector2.zero;
+                    ResetWalk();
                     SetMoveDirection(Vector2.zero);
 
                     if (motor != null)
@@ -980,6 +1066,7 @@ namespace TakoBoyStudios.TopDown2D
                     _airborne = false;
 
                     // Cannot move: kill steering and the incoming knockback so the hit does not slide us.
+                    ResetWalk();
                     SetMoveDirection(Vector2.zero);
                     m_moveInput = Vector2.zero;
                     m_impulseVelocity = Vector2.zero;
@@ -1095,15 +1182,122 @@ namespace TakoBoyStudios.TopDown2D
         // -----------------------------
         // Input Handling
         // -----------------------------
-        void HandleMovementInput()
+        void HandleMovementInput(float deltaTime)
         {
             Vector2 input = InputLocked ? Vector2.zero : _moveAction.ReadValue<Vector2>();
+            if (input.sqrMagnitude > 1f)
+                input.Normalize();
 
-            SetMoveDirection(input);
+            if (eightWayMovement)
+                input = SnapWalkToEight(input);
 
+            // Facing follows the stick the frame it moves, whatever the walk itself is doing.
             if (input.sqrMagnitude > 0.001f)
                 m_lastMoveDirection = input;
+
+            StepWalk(input, deltaTime);
         }
+
+        /// <summary>
+        /// One frame of the walk (T-460). The stick is a request; the walk has its own speed and
+        /// direction and moves them toward it: a push-off acceleration up to the top speed, a bend
+        /// toward a new direction that snaps once nearly aligned, and a brake to a stop when the
+        /// stick is released or reversed. A reversal only turns once the brake has reached zero, so a
+        /// hard about-face reads as a plant rather than a teleport. The result is handed to the motor
+        /// as a move input scaled so that Entity's <c>input * speed</c> comes out at the walk's speed.
+        /// </summary>
+        void StepWalk(Vector2 input, float deltaTime)
+        {
+            float magnitude = input.magnitude;
+            bool held = magnitude > 0.001f;
+
+            // What the run and the statuses make of the base speed (Chill, a speed Perk), scaled by
+            // the stick when movement is free angle. Eight-way input arrives at unit length.
+            float baseSpeed = GetMoveSpeed();
+            float top = baseSpeed * Mathf.Min(1f, magnitude);
+            Vector2 wanted = held ? input / magnitude : Vector2.zero;
+
+            // From a standstill there is nothing to bend: the first step goes where the stick points.
+            if (held && _walkSpeed <= 0.0001f)
+                _walkDirection = wanted;
+
+            float dot = held ? Vector2.Dot(wanted, _walkDirection) : -1f;
+
+            if (held && dot >= ReversalDot)
+            {
+                _skidPlayed = false;
+
+                if (dot < TurnSnapDot)
+                {
+                    float rate = walkTurnRate * (1f + Mathf.Abs(dot));
+                    _walkDirection += (wanted - _walkDirection) * Mathf.Min(1f, rate * deltaTime);
+                    if (_walkDirection.sqrMagnitude > 0.0001f)
+                        _walkDirection.Normalize();
+                    else
+                        _walkDirection = wanted;
+                }
+                else
+                {
+                    _walkDirection = wanted;
+                }
+
+                _walkSpeed = _walkSpeed * (1f + walkGrowth * deltaTime) + walkAcceleration * top * deltaTime;
+                if (_walkSpeed > top)
+                    _walkSpeed = top;
+            }
+            else
+            {
+                // Released, or pushed back against the walk: brake. The reversal is the one time the
+                // body visibly fights the stick, so it gets a pose if the character has one.
+                if (held && _walkSpeed > 0f && !_skidPlayed)
+                {
+                    _skidPlayed = true;
+                    PlaySkidVisual(_walkDirection);
+                }
+
+                _walkSpeed -= walkBrake * baseSpeed * deltaTime;
+                if (_walkSpeed <= 0f)
+                {
+                    _walkSpeed = 0f;
+                    if (held)
+                        _walkDirection = wanted;
+                }
+            }
+
+            // Entity applies m_moveInput * m_moveSpeed, so divide the walk's speed back out.
+            float scale = m_moveSpeed > 0.0001f ? 1f / m_moveSpeed : 0f;
+            SetMoveDirection(_walkDirection * (_walkSpeed * scale));
+
+            if (DebugDraw.Enabled && _walkSpeed > 0f)
+            {
+                // Where the walk is carrying him and how fast: a quarter second of travel.
+                DebugDraw.Line(Position, (Vector2)Position + _walkDirection * (_walkSpeed * 0.25f), new Color(0.3f, 0.9f, 1f, 1f));
+            }
+        }
+
+        /// <summary>
+        /// Eight-way input with a cardinal band: a stick within about 22 degrees of an axis walks
+        /// straight along it, anything else walks the diagonal at unit length, so a diagonal is the
+        /// same speed as a cardinal.
+        /// </summary>
+        static Vector2 SnapWalkToEight(Vector2 input)
+        {
+            if (input.sqrMagnitude < 0.0001f)
+                return Vector2.zero;
+
+            Vector2 n = input.normalized;
+            if (Mathf.Abs(n.x) >= CardinalBand)
+                return new Vector2(Mathf.Sign(n.x), 0f);
+            if (Mathf.Abs(n.y) >= CardinalBand)
+                return new Vector2(0f, Mathf.Sign(n.y));
+            return new Vector2(Mathf.Sign(n.x), Mathf.Sign(n.y)) * 0.70710678f;
+        }
+
+        /// <summary>
+        /// The reversal pose, played once when the stick is pushed back against a walk in progress and
+        /// the brake begins. Empty here; a character with skid art faces it the way the walk was going.
+        /// </summary>
+        protected virtual void PlaySkidVisual(Vector2 direction) { }
 
         /// <summary>
         /// Reads the aim and locks it to one of eight directions.
@@ -1212,6 +1406,7 @@ namespace TakoBoyStudios.TopDown2D
             switch (step)
             {
                 case Fsm.StateStep.Enter:
+                    ResetWalk();
                     SetMoveDirection(Vector2.zero);
                     _throwStarted = false;
                     _thrown = false;
@@ -1326,6 +1521,7 @@ namespace TakoBoyStudios.TopDown2D
             sb.AppendLine("─────────────────────");
             sb.AppendLine("<b>PLAYER</b>");
             sb.AppendLine($"Shoot Dir: {_shootDirection.x:F2}, {_shootDirection.y:F2}");
+            sb.AppendLine($"Walk: {_walkSpeed:F0} px/s along {_walkDirection.x:F2}, {_walkDirection.y:F2}");
             sb.AppendLine($"Height: {(motor != null ? motor.Height : 0f):F1}   Grounded: {Grounded}");
 
             if (m_basicGun)
