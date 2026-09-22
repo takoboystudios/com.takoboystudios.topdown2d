@@ -66,6 +66,34 @@ namespace TakoBoyStudios.TopDown2D
 
         public Team Team => team;
 
+        Team _authoredTeam;
+        bool _authoredTeamKnown;
+
+        /// <summary>
+        /// Changes which side this box is on for the rest of its life. For a shot that changes hands:
+        /// a projectile knocked back by a melee has to start hurting what fired it, and the team is
+        /// what decides friend from foe (the layer does not, every hitbox shares one).
+        ///
+        /// Pooled bodies keep it, so whatever sets it resets it on acquire, the way Projectile.SetSpeed
+        /// already does with its own speed.
+        /// </summary>
+        public void SetTeam(Team value)
+        {
+            if (!_authoredTeamKnown)
+            {
+                _authoredTeam = team;
+                _authoredTeamKnown = true;
+            }
+            team = value;
+        }
+
+        /// <summary>Back to the team the prefab was authored with.</summary>
+        public void ResetTeam()
+        {
+            if (_authoredTeamKnown)
+                team = _authoredTeam;
+        }
+
         public override void Init(Entity owner)
         {
             base.Init(owner);

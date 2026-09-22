@@ -128,6 +128,29 @@ namespace TakoBoyStudios.TopDown2D
         public int TotalHits => _totalHits;
         public IReadOnlyCollection<Hitbox2D> AlreadyHit => _alreadyHit;
         public DamageValues Damage => damage;
+
+        int _authoredDamage = -1;
+
+        /// <summary>
+        /// Overrides how much this box takes off, for the rest of its life. For a shot that changes
+        /// hands: Mina re-profiles a deflected mud ball to a weaker record rather than keeping the
+        /// one it was fired with, and ours does the opposite and makes it worth more.
+        ///
+        /// Pooled bodies keep it, so whatever sets it resets it on acquire.
+        /// </summary>
+        public void SetDamage(int amount)
+        {
+            if (_authoredDamage < 0)
+                _authoredDamage = damage.damage;
+            damage.damage = amount;
+        }
+
+        /// <summary>Back to the damage the prefab was authored with.</summary>
+        public void ResetDamage()
+        {
+            if (_authoredDamage >= 0)
+                damage.damage = _authoredDamage;
+        }
         public AttackHeight AttackHeight => m_attackHeight;
         public float GroundClearance => m_groundClearance;
 
