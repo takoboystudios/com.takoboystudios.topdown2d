@@ -484,17 +484,12 @@ namespace TakoBoyStudios.TopDown2D
                 }
             }
 
-            // Fallback to south direction if not already trying south. Mirrored when the facing is a
-            // westward one, because a body drawn only facing the camera still has a left and a right:
-            // without this the Buzz Bomber faced the same way whatever it was chasing, which reads as
-            // the turn being broken rather than as art it does not have (T-450). Only affects art with
-            // no east clip at all, which is buzz-bomber, sand-crab and sand-whelp.
+            // Fallback to south direction if not already trying south
             if (direction != "s")
             {
                 string southAnimName = $"{animBase}-s";
                 if (animator.HasAnimation(southAnimName))
                 {
-                    flipX = direction == "w" || direction == "nw" || direction == "sw";
                     return "s";
                 }
             }
