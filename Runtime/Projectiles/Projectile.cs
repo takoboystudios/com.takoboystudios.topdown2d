@@ -64,6 +64,16 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>Distance flown this life, against maxRange. Reset per shot, since bullets are pooled.</summary>
         float _travelled;
         Hurtbox2D _hurtbox;
+
+        /// <summary>
+        /// What this shot hurts things with. For a projectile that replaces StateIdle and so has to
+        /// run its own contact check: take the one the base already found rather than declaring a
+        /// second field for it, which costs another GetComponentInChildren and, if it happens to be
+        /// named the same, is a serialization error ("the same field name is serialized multiple
+        /// times in the class or its parent class").
+        /// </summary>
+        protected Hurtbox2D Hurtbox => _hurtbox;
+
         float _spawnGracePeriod;
 
         ContactFilter2D _homingFilter;
