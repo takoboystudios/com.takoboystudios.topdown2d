@@ -11,6 +11,7 @@ namespace TakoBoyStudios.TopDown2D
         Jump = EntityState.Custom,
         Damaged,
         Throwing,
+        Reviving,
     }
 
     /// <summary>
@@ -120,6 +121,31 @@ namespace TakoBoyStudios.TopDown2D
         [Tooltip("How fast the sprite flickers on and off during the invincible recovery, in seconds per toggle. ~0.08s.")]
         [SerializeField, MinValue(0.02f)]
         float blinkInterval = 0.08f;
+
+        [BoxGroup("Revive")]
+        [Tooltip("How close a partner has to stand to a downed player's ghost to revive them with Interact, in pixels. A tile and a half is 24.")]
+        [SerializeField, MinValue(0f)]
+        float reviveRange = 24f;
+
+        [BoxGroup("Revive")]
+        [Tooltip("How long the reviver kneels, rooted, before the ghost comes back, in seconds. A hit cancels it. ~1.2.")]
+        [SerializeField, MinValue(0f)]
+        float reviveDuration = 1.2f;
+
+        [BoxGroup("Revive")]
+        [Tooltip("Seconds of blinking invincibility a revived player gets, so they are not killed again the moment they stand. ~1.5.")]
+        [SerializeField, MinValue(0f)]
+        float reviveInvulnDuration = 1.5f;
+
+        // Downed and revive (T-438). A dead player is downed: the death clip plays out, then they wait as
+        // a ghost until something calls Resurrect. The engine's Dead state is the downed state, so
+        // everything that already treats a dead player as out of play (doors, the camera, LivingCount)
+        // treats a downed one the same way with no change.
+        bool _deathPlayed;
+        bool _resurrectRequested;
+        bool _resurrecting;
+        Player _reviveTarget;
+        float _reviveTimer;
 
         PlayerInput _playerInput;
         InputAction _moveAction;
@@ -350,6 +376,7 @@ namespace TakoBoyStudios.TopDown2D
             m_fsm.AddState(StateJump);
             m_fsm.AddState(StateDamaged);
             m_fsm.AddState(StateThrowing);
+            m_fsm.AddState(StateReviving);
         }
 
         /// <summary>
@@ -391,6 +418,13 @@ namespace TakoBoyStudios.TopDown2D
 
             // Clear any in-progress hurt invincibility so the fresh room starts solid and hittable.
             EndInvulnerability();
+
+            // Standing up from any route (a revive, the tavern wake) ends being downed, and a revive
+            // this player was giving does not carry into the new room.
+            _deathPlayed = false;
+            _resurrectRequested = false;
+            _resurrecting = false;
+            _reviveTarget = null;
 
             if (restoreHealth)
             {
@@ -458,15 +492,39 @@ namespace TakoBoyStudios.TopDown2D
         // -----------------------------
         // FSM States (Logic Only)
         // -----------------------------
+        /// <summary>True once the death clip has played out. What the game-over beat waits on, since a ghost that follows never finishes.</summary>
+        public bool DeathPlayed => _deathPlayed;
+
+        /// <summary>A resurrection has been asked for or is playing. Counts as standing for anything deciding whether the run is over.</summary>
+        public bool IsResurrecting => _resurrectRequested || _resurrecting;
+
+        /// <summary>Down and waiting for a revive: dead, and nothing is bringing them back yet.</summary>
+        public bool IsDowned => IsDead && !IsResurrecting;
+
         /// <summary>
-        /// Grim dying. The base entity disposes itself the moment it enters this state, which is right
-        /// for a slime and catastrophic for the player: it would pool Grim away mid-run and leave the
-        /// room being played by nobody. So this deliberately does not call base.
+        /// Brings a downed player back where they fell: the death clip finishes if it is still playing,
+        /// the resurrection plays, and they stand up at full health with a short blinking invincibility.
+        /// Safe to call on the frame of death, before the Dead state has been applied. Does nothing to
+        /// a player who is alive.
+        /// </summary>
+        public void Resurrect()
+        {
+            if (Health > 0 && !IsDead)
+                return;
+
+            _resurrectRequested = true;
+        }
+
+        /// <summary>
+        /// Grim dying, and then downed (T-438). The base entity disposes itself the moment it enters
+        /// this state, which is right for a slime and catastrophic for the player: it would pool Grim
+        /// away mid-run and leave the room being played by nobody. So this deliberately does not call
+        /// base.
         ///
-        /// He stops, loses control, and plays it out. Nothing clears the state afterwards, because
-        /// there is nowhere to go yet: no run summary, no meta progression, no menu. Dying leaves the
-        /// game sitting on the corpse, which is honest about how far the run loop actually goes, and
-        /// is better than inventing a restart nobody has designed.
+        /// He stops, loses control, and plays the death out. Then one of three things: a resurrection
+        /// that has been asked for plays; with a partner still standing he waits as a ghost for them to
+        /// revive him; alone, he stays on the last frame of the death, and the room decides the run is
+        /// over. The ghost is chosen every frame, so it appears the moment a partner stands back up.
         /// </summary>
         protected override void StateDead(Fsm.StateStep step, float deltaTime)
         {
@@ -476,6 +534,8 @@ namespace TakoBoyStudios.TopDown2D
                     m_moveInput = Vector2.zero;
                     m_impulseVelocity = Vector2.zero;
                     SetMoveDirection(Vector2.zero);
+                    _deathPlayed = false;
+                    _resurrecting = false;
 
                     // Hit lag pauses the animator and is cleared inside Tick, which returns early for
                     // anything dead. Every other entity disposes on the frame it dies so never notices;
@@ -483,15 +543,169 @@ namespace TakoBoyStudios.TopDown2D
                     // death clip is frozen on frame 0 by the pause that killed him.
                     StopHitLag();
 
+                    // A body on the floor is not a target: shots pass over it rather than stopping on
+                    // it. Ended first so a hurt blink still running cannot switch it back on mid-death.
+                    EndInvulnerability();
+                    SetInvulnerable(true);
+
                     // Straight to the clip, not queued. The FSM only applies a queued change on its
                     // next tick, and the player is not ticked while dead, so a queued animation would
                     // never arrive. Same trap as T-230.
-                    PlayAnimation(AnimConst.Death);
+                    PlayDownedClip(AnimConst.Death);
                     break;
 
                 case Fsm.StateStep.Update:
-                    // Deliberately empty. No input is read, the gun is not ticked, and the last frame
-                    // of the death clip is where Grim stays.
+                    // No input is read and the gun is not ticked.
+                    if (_resurrecting)
+                    {
+                        if (m_entityAnimator == null
+                            || m_entityAnimator.CurrentAnimationName != AnimConst.Resurrection
+                            || m_entityAnimator.IsDone)
+                        {
+                            FinishResurrection();
+                        }
+                        break;
+                    }
+
+                    if (!_deathPlayed)
+                    {
+                        if (m_entityAnimator != null
+                            && m_entityAnimator.CurrentAnimationName == AnimConst.Death
+                            && !m_entityAnimator.IsDone)
+                        {
+                            break;
+                        }
+                        _deathPlayed = true;
+                    }
+
+                    if (_resurrectRequested)
+                    {
+                        _resurrectRequested = false;
+                        _resurrecting = true;
+                        if (!PlayDownedClip(AnimConst.Resurrection))
+                            FinishResurrection();
+                        break;
+                    }
+
+                    // Only worth waiting as a ghost while somebody could revive. LivingCount does not
+                    // count this player, who is dead by now.
+                    if (Players.LivingCount > 0 && m_entityAnimator != null
+                        && m_entityAnimator.CurrentAnimationName != AnimConst.Ghost)
+                    {
+                        PlayDownedClip(AnimConst.Ghost);
+                    }
+
+                    if (DebugDraw.Enabled)
+                        DebugDraw.Box(Position, new Vector2(reviveRange * 2f, reviveRange * 2f), new Color(0.4f, 1f, 0.7f, 1f));
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Puts on one of the downed clips from its first frame. Clears a pause first, because Grim's
+        /// idle pose freezes the animator and Play does not resume it. False when the clip is missing.
+        /// </summary>
+        bool PlayDownedClip(string clip)
+        {
+            if (m_entityAnimator == null || !m_entityAnimator.HasAnimation(clip))
+                return false;
+
+            m_entityAnimator.Paused = false;
+            m_entityAnimator.Play(clip);
+            return true;
+        }
+
+        void FinishResurrection()
+        {
+            // Back to a clean, full-health Idle where they lie. PlaceInRoom clears the downed flags
+            // and ends the invulnerability, so the revive's own window is started after it.
+            PlaceInRoom(Position, restoreHealth: true);
+
+            if (reviveInvulnDuration > 0f)
+            {
+                SetInvulnerable(true);
+                _invulnTimer = reviveInvulnDuration;
+                _blinkTimer = 0f;
+                _blinkVisible = true;
+            }
+        }
+
+        /// <summary>
+        /// Starts reviving a downed partner in reach, on Interact. The nearest one wins. Walks the seats
+        /// by index, so a press allocates nothing.
+        /// </summary>
+        bool TryStartRevive()
+        {
+            if (!InteractPressed)
+                return false;
+
+            Player best = null;
+            float bestDistance = reviveRange;
+            int seats = Players.SeatCount;
+            for (int i = 0; i < seats; i++)
+            {
+                Player other = Players.At(i);
+                if (other == null || other == this || !other.IsDowned)
+                    continue;
+
+                float distance = Vector2.Distance(other.Position, Position);
+                if (distance <= bestDistance)
+                {
+                    bestDistance = distance;
+                    best = other;
+                }
+            }
+
+            if (best == null)
+                return false;
+
+            _reviveTarget = best;
+            m_fsm.ChangeState((int)PlayerState.Reviving);
+            return true;
+        }
+
+        /// <summary>
+        /// Kneeling over a downed partner (T-438). Rooted and not shooting for
+        /// <see cref="reviveDuration"/>, then the partner resurrects. Committing is the cost: a hit
+        /// moves this player to Damaged, which ends the revive, and the partner stays down.
+        /// </summary>
+        void StateReviving(Fsm.StateStep step, float deltaTime)
+        {
+            switch (step)
+            {
+                case Fsm.StateStep.Enter:
+                    SetMoveDirection(Vector2.zero);
+                    m_moveInput = Vector2.zero;
+                    _shootDirection = Vector2.zero;
+                    _reviveTimer = 0f;
+                    PlayDownedClip(AnimConst.Revive);
+                    break;
+
+                case Fsm.StateStep.Update:
+                    SetMoveDirection(Vector2.zero);
+
+                    // Someone else got there first, or the partner left the game.
+                    if (_reviveTarget == null || !_reviveTarget.IsDowned)
+                    {
+                        _reviveTarget = null;
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                        break;
+                    }
+
+                    if (DebugDraw.Enabled)
+                        DebugDraw.Line(Position, _reviveTarget.Position, new Color(0.4f, 1f, 0.7f, 1f));
+
+                    _reviveTimer += deltaTime;
+                    if (_reviveTimer >= reviveDuration)
+                    {
+                        _reviveTarget.Resurrect();
+                        _reviveTarget = null;
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                    }
+                    break;
+
+                case Fsm.StateStep.Exit:
+                    _reviveTarget = null;
                     break;
             }
         }
@@ -507,6 +721,9 @@ namespace TakoBoyStudios.TopDown2D
             // rather than the component being disabled, so animation, physics and everything else keep
             // running and Grim walks in looking like himself.
             if (TickScriptedWalk(deltaTime))
+                return;
+
+            if (TryStartRevive())
                 return;
 
             HandleMovementInput();
@@ -953,6 +1170,7 @@ namespace TakoBoyStudios.TopDown2D
             if (m_fsm.CurrentState == (int)PlayerState.Jump
                 || m_fsm.CurrentState == (int)PlayerState.Damaged
                 || m_fsm.CurrentState == (int)PlayerState.Throwing
+                || m_fsm.CurrentState == (int)PlayerState.Reviving
                 || IsDead)
             {
                 return;
@@ -1137,6 +1355,7 @@ namespace TakoBoyStudios.TopDown2D
             {
                 (int)PlayerState.Jump => "Jump",
                 (int)PlayerState.Damaged => "Damaged",
+                (int)PlayerState.Reviving => "Reviving",
                 (int)EntityState.Idle => "Idle",
                 (int)EntityState.Dead => "Dead",
                 _ => $"Custom ({m_fsm.CurrentStateName})",
