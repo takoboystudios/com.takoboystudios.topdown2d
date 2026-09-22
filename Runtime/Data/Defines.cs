@@ -21,6 +21,9 @@ namespace TakoBoyStudios.TopDown2D
         public const string TeleportOut = "teleport-out";
         public const string Shoot = "shoot";
         public const string Death = "death";
+        public const string Ghost = "ghost";
+        public const string Revive = "revive";
+        public const string Resurrection = "resurrection";
 
         public const string North = "n";
         public const string South = "s";
