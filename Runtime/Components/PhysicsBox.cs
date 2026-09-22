@@ -91,8 +91,10 @@ namespace TakoBoyStudios.TopDown2D
         /// so there is nothing here for a pool path to remember to do and therefore nothing for it to
         /// get wrong.
         /// </summary>
-        void OnEnable()
+        protected override void OnEnable()
         {
+            base.OnEnable();
+
             if (!Application.isPlaying)
                 return;
 
