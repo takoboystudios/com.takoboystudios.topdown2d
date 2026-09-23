@@ -36,6 +36,9 @@ namespace TakoBoyStudios.TopDown2D
         static readonly int SwapOnId = Shader.PropertyToID("_SwapOn");
         static readonly int SwapFromId = Shader.PropertyToID("_SwapFrom");
         static readonly int SwapToId = Shader.PropertyToID("_SwapTo");
+        static readonly int LitOnId = Shader.PropertyToID("_LitOn");
+        static readonly int LitFromId = Shader.PropertyToID("_LitFrom");
+        static readonly int LitToId = Shader.PropertyToID("_LitTo");
 
         /// <summary>
         /// A soft white overlay instead of Grim's amber/red hurt palette. A barrel or crate is not
@@ -231,6 +234,36 @@ namespace TakoBoyStudios.TopDown2D
                 _block.SetFloat(FlashOverlayId, amount);
                 renderer.SetPropertyBlock(_block);
             }
+        }
+
+        /// <summary>
+        /// Puts one renderer on the shared flash material, for a body that does not flash but wants
+        /// one of the material's swaps. Nothing else about the renderer changes.
+        /// </summary>
+        public static void UseSharedMaterial(SpriteRenderer renderer)
+        {
+            Material material = SharedMaterial();
+            if (renderer != null && material != null)
+                renderer.sharedMaterial = material;
+        }
+
+        /// <summary>
+        /// The lit swap on one renderer: every pixel exactly <paramref name="from"/> becomes
+        /// <paramref name="to"/> while on. Separate from the status swap so the two never overwrite each
+        /// other. The caller decides when it changes; this writes the block every call, so call it on
+        /// a change, not every frame.
+        /// </summary>
+        public static void SetLit(SpriteRenderer renderer, bool on, Color from, Color to)
+        {
+            if (renderer == null)
+                return;
+
+            _block ??= new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(_block);
+            _block.SetFloat(LitOnId, on ? 1f : 0f);
+            _block.SetColor(LitFromId, from);
+            _block.SetColor(LitToId, to);
+            renderer.SetPropertyBlock(_block);
         }
 
         /// <summary>

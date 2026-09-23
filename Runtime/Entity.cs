@@ -335,7 +335,16 @@ namespace TakoBoyStudios.TopDown2D
 
             LiftHitboxes(height);
             _shadowFrame = Shadows.Show(m_shadowAnimator, m_shadowSize, height, _shadowFrame);
+
+            OnLateUpdate();
         }
+
+        /// <summary>
+        /// After every Update this frame, including the sprite animators', which have advanced their
+        /// frames by now. The place for anything that must match the frame about to be drawn exactly,
+        /// such as a recolour tied to a specific animation frame.
+        /// </summary>
+        protected virtual void OnLateUpdate() { }
 
         float[] _hitboxBaseY;
 
