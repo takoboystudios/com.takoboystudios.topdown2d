@@ -42,8 +42,20 @@ namespace TakoBoyStudios.TopDown2D
 
         [FoldoutGroup("Muzzle")]
         [InfoBox("Muzzle points are edited in the Scene view: select the gun and drag the lettered dots. Whole pixels, with Undo.")]
-        [Tooltip("The single muzzle, in pixels from the gun's transform.")]
+        [Tooltip("The single muzzle, in pixels from the gun's transform. This is a GROUND offset: see muzzleHeight.")]
         public Vector2 muzzleOffset;
+
+        [FoldoutGroup("Muzzle")]
+        [Tooltip(
+            "How high up the body the gun sits, in pixels. Use this for height, NOT the y of the "
+                + "offsets above.\n\n"
+                + "The offsets are positions on the floor, and in a top-down game the floor's y IS "
+                + "depth: a muzzle 5 px 'up' is 5 px further away, so its shot sorts BEHIND the "
+                + "shooter. That is correct for a muzzle pointing north, and wrong for a gun held at "
+                + "chest height. This raises the shot visually while it keeps the shooter's footing, "
+                + "so it draws in front and still sorts by where it stands."
+        )]
+        public float muzzleHeight;
 
         // The eight directional points, in pixels from the gun's transform, compass order from north
         // clockwise: N NE E SE S SW W NW. Hidden: the Scene handles are the editor for these.
@@ -125,6 +137,11 @@ namespace TakoBoyStudios.TopDown2D
                 return null;
             Projectile bullet = bulletObject.GetComponent<Projectile>();
             bullet.transform.position = muzzleWorld;
+
+            // Height is hover, never y. The shot stands where the muzzle stands and is drawn above
+            // it, so it sorts against the world by its footing rather than by how high it was held.
+            if (muzzleHeight != 0f)
+                bullet.SetLaunchHeight(muzzleHeight);
 
             // After Acquire, because a pooled body clears its Instigator when it is handed out.
             bullet.Instigator = _shooter;

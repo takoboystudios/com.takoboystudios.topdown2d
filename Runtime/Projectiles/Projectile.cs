@@ -166,6 +166,19 @@ namespace TakoBoyStudios.TopDown2D
         float _baseSpeed;
         bool _baseSpeedKnown;
 
+        /// <summary>
+        /// How high above its own footing the shot is drawn, in pixels, for a gun held up the body.
+        ///
+        /// Height is hover, never y: a shot moved up in y is moved further away, and sorts behind
+        /// whoever fired it. This raises the picture and leaves the footing alone, so it draws in
+        /// front and still sorts against the world by where it stands.
+        /// </summary>
+        public void SetLaunchHeight(float pixels)
+        {
+            if (motor != null)
+                motor.SetHover(pixels);
+        }
+
         public void Shoot(Vector3 direction, Transform target = null)
         {
             _direction = direction.normalized;
