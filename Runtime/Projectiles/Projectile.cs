@@ -184,15 +184,54 @@ namespace TakoBoyStudios.TopDown2D
         // -----------------------------
         // FSM States
         // -----------------------------
+
+        #region Flight animation
+
+        bool _playingIntro;
+
+        /// <summary>
+        /// Starts the flight animation: the intro clip if the art has one, otherwise the loop.
+        ///
+        /// A lot of art is drawn with a lead-in frame or two, and until now nothing played them: the
+        /// pipeline imported a `spawn` clip and the projectile went straight to `idle`, so a shot
+        /// that was drawn appearing simply appeared. It is one or two frames, which is exactly the
+        /// weight that makes a thing look like it arrived rather than blinked into being.
+        ///
+        /// **The intro never holds up the shot.** It flies, hurts and collides throughout; only the
+        /// picture is different. Call this on entering flight, and TickFlightAnimation each frame.
+        /// </summary>
+        protected void BeginFlightAnimation()
+        {
+            _playingIntro = m_entityAnimator != null && m_entityAnimator.HasAnimation(AnimConst.Spawn);
+            PlayAnimation(_playingIntro ? AnimConst.Spawn : AnimConst.Idle);
+        }
+
+        /// <summary>Swaps the intro for the loop once it has played out. Safe to call when there was no intro.</summary>
+        protected void TickFlightAnimation()
+        {
+            if (!_playingIntro)
+                return;
+
+            if (m_entityAnimator == null || m_entityAnimator.IsDone)
+            {
+                _playingIntro = false;
+                PlayAnimation(AnimConst.Idle);
+            }
+        }
+
+        #endregion
+
         protected override void StateIdle(Fsm.StateStep step, float deltaTime)
         {
             switch (step)
             {
                 case Fsm.StateStep.Enter:
-                    PlayAnimation(AnimConst.Idle);
+                    BeginFlightAnimation();
                     break;
 
                 case Fsm.StateStep.Update:
+                    TickFlightAnimation();
+
                     // Tick down grace period
                     if (_spawnGracePeriod > 0f)
                     {

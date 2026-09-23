@@ -21,6 +21,14 @@ namespace TakoBoyStudios.TopDown2D
         #region Inspector
 
         [BoxGroup("Effect")]
+        [Tooltip(
+            "Played first, if the art has one: the frame or two of the thing arriving, before the "
+                + "main animation. Leave empty for art with no lead-in. The effect is live throughout, "
+                + "so an intro never delays what it does, only how it looks turning up."
+        )]
+        [SerializeField]
+        string introAnimation = "";
+
         [Tooltip("Animation played on spawn. The effect releases itself when this finishes.")]
         [SerializeField]
         string animationName = "idle";
@@ -142,12 +150,26 @@ namespace TakoBoyStudios.TopDown2D
             Play();
         }
 
+        bool _playingIntro;
+
         void Play()
         {
             if (damageBox != null)
                 damageBox.ResetTracking();
 
-            if (m_entityAnimator != null && !string.IsNullOrEmpty(animationName))
+            if (m_entityAnimator == null)
+                return;
+
+            // The intro, when there is one and the art actually owns it. A named clip the art does
+            // not have would otherwise leave the effect showing nothing at all.
+            _playingIntro = !string.IsNullOrEmpty(introAnimation) && m_entityAnimator.HasAnimation(introAnimation);
+            if (_playingIntro)
+            {
+                m_entityAnimator.Play(introAnimation);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(animationName))
                 m_entityAnimator.Play(animationName);
         }
 
@@ -170,7 +192,17 @@ namespace TakoBoyStudios.TopDown2D
                     damageBox.CheckArea(damageBox.transform.position);
             }
 
-            if (!staysUntilReleased && (m_entityAnimator == null || m_entityAnimator.IsDone))
+            // The intro hands over to the main clip rather than ending the effect, so an effect with
+            // a lead-in is not released after two frames of it.
+            if (_playingIntro && m_entityAnimator != null && m_entityAnimator.IsDone)
+            {
+                _playingIntro = false;
+                if (!string.IsNullOrEmpty(animationName))
+                    m_entityAnimator.Play(animationName);
+                return true;
+            }
+
+            if (!_playingIntro && !staysUntilReleased && (m_entityAnimator == null || m_entityAnimator.IsDone))
                 Dispose();
 
             return true;
