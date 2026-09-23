@@ -118,6 +118,16 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField]
         bool eightWayMovement;
 
+        [BoxGroup("Walk")]
+        [Tooltip(
+            "How long after the last change of direction a full release still counts as releasing the "
+                + "direction before it, in seconds. On a keyboard or d-pad the two keys of a diagonal never "
+                + "lift on the same frame, so without this a diagonal always ends facing whichever key "
+                + "lifted last and no diagonal idle is reachable. Also applied to the aim. About 0.08."
+        )]
+        [SerializeField, MinValue(0f)]
+        float releaseGrace = 0.08f;
+
         /// <summary>Past this dot with the current walk direction the stick is a turn; below it, a reversal.</summary>
         const float ReversalDot = -0.01f;
 
@@ -132,6 +142,21 @@ namespace TakoBoyStudios.TopDown2D
         Vector2 _walkDirection = Vector2.down;
         float _walkSpeed;
         bool _skidPlayed;
+
+        // Release grace (T-468). The facing a key-lift skew would lose, and when the facing last
+        // changed, for the stick and for the aim separately.
+        Vector2 _facingBeforeChange;
+        float _facingChangedAt = -1f;
+        bool _moveWasHeld;
+        Vector2 _aimBeforeChange;
+        float _aimChangedAt = -1f;
+
+        /// <summary>
+        /// On the frame the aim is released, the aim to keep facing: the one held before a change
+        /// inside the grace window, or the last aim otherwise. Zero on every other frame. A character
+        /// reads it to face its idle the way the player was really pointing.
+        /// </summary>
+        protected Vector2 _aimReleasedFacing;
 
         /// <summary>The walk's current speed along <see cref="WalkDirection"/>, in pixels per second.</summary>
         public float WalkSpeed => _walkSpeed;
@@ -449,6 +474,10 @@ namespace TakoBoyStudios.TopDown2D
             // layer stays an implementation detail of whoever raises the frame.
             if (motor != null)
                 motor.ContainedByPlayerFrame = true;
+
+            // The facing is decided here, from the stick, with the release grace below. Left to the
+            // physics tick it would be overwritten with the bending walk direction during the brake.
+            m_ownsLastMoveDirection = true;
 
             EntityEvents.ReportPlayerSpawned(this);
         }
@@ -1192,8 +1221,25 @@ namespace TakoBoyStudios.TopDown2D
                 input = SnapWalkToEight(input);
 
             // Facing follows the stick the frame it moves, whatever the walk itself is doing.
-            if (input.sqrMagnitude > 0.001f)
+            bool held = input.sqrMagnitude > 0.001f;
+            if (held)
+            {
+                if (_moveWasHeld && Aim.Snap(input) != Aim.Snap(m_lastMoveDirection))
+                {
+                    _facingBeforeChange = m_lastMoveDirection;
+                    _facingChangedAt = Time.time;
+                }
                 m_lastMoveDirection = input;
+            }
+            else if (_moveWasHeld)
+            {
+                // Released. If the direction only just changed, the change was the first key of a
+                // pair lifting: face the way the pair pointed, not the straggler.
+                if (_facingChangedAt >= 0f && Time.time - _facingChangedAt <= releaseGrace)
+                    m_lastMoveDirection = _facingBeforeChange;
+                _facingChangedAt = -1f;
+            }
+            _moveWasHeld = held;
 
             StepWalk(input, deltaTime);
         }
@@ -1312,10 +1358,12 @@ namespace TakoBoyStudios.TopDown2D
         void HandleAttackInput()
         {
             _shootDirection = Vector2.zero;
+            _aimReleasedFacing = Vector2.zero;
 
             if (InputLocked)
             {
                 _heldAim = Vector2.zero;
+                _aimChangedAt = -1f;
                 return;
             }
 
@@ -1323,11 +1371,25 @@ namespace TakoBoyStudios.TopDown2D
 
             if (!Aim.IsAiming(shootInput))
             {
+                // Released. The same key-lift skew as the walk: a diagonal aim's second key lifts a
+                // frame after the first, so the last aim seen is a cardinal. Face the pair instead.
+                if (_heldAim.sqrMagnitude > 0.0001f)
+                {
+                    bool justChanged = _aimChangedAt >= 0f && Time.time - _aimChangedAt <= releaseGrace;
+                    _aimReleasedFacing = justChanged ? _aimBeforeChange : _heldAim;
+                }
                 _heldAim = Vector2.zero;
+                _aimChangedAt = -1f;
                 return;
             }
 
-            _heldAim = Aim.Snap(shootInput, _heldAim);
+            Vector2 snapped = Aim.Snap(shootInput, _heldAim);
+            if (_heldAim.sqrMagnitude > 0.0001f && snapped != _heldAim)
+            {
+                _aimBeforeChange = _heldAim;
+                _aimChangedAt = Time.time;
+            }
+            _heldAim = snapped;
             _shootDirection = _heldAim;
 
             if (m_basicGun)

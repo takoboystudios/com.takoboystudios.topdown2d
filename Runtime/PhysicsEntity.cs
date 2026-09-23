@@ -49,6 +49,10 @@ namespace TakoBoyStudios.TopDown2D
         // Additive velocity from knockback, dashes and scripted pushes.
         protected Vector2 m_impulseVelocity;
 
+        // A subclass that decides its own facing (the player, from the stick) sets this so the
+        // physics tick stops overwriting m_lastMoveDirection with the integrated move input.
+        protected bool m_ownsLastMoveDirection;
+
         protected bool m_flying;
 
         // What this body collided with before it took off, so landing can restore it.
@@ -129,7 +133,7 @@ namespace TakoBoyStudios.TopDown2D
             }
 
             // Update last move direction for facing and attacks.
-            if (m_moveInput.sqrMagnitude > 0.0001f)
+            if (!m_ownsLastMoveDirection && m_moveInput.sqrMagnitude > 0.0001f)
                 m_lastMoveDirection = m_moveInput;
         }
 
