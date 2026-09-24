@@ -132,6 +132,18 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, MinValue(0f)]
         float releaseGrace = 0.08f;
 
+        [BoxGroup("Walk")]
+        [Tooltip(
+            "The aim only. How long the first key of an aim waits for a second before the gun fires, in "
+                + "seconds. The two keys of a diagonal never go down on the same frame either, so without "
+                + "this pressing up and right fires one bullet straight up before the diagonal. A second "
+                + "key inside the window starts the aim on the diagonal; otherwise it starts on the one "
+                + "key. Every straight shot from rest on keys is late by this much, so keep it short. "
+                + "Sticks never wait. About 0.05."
+        )]
+        [SerializeField, MinValue(0f)]
+        float pressGrace = 0.05f;
+
         /// <summary>Past this dot with the current walk direction the stick is a turn; below it, a reversal.</summary>
         const float ReversalDot = -0.01f;
 
@@ -152,6 +164,11 @@ namespace TakoBoyStudios.TopDown2D
         // is being held back.
         float _facingLiftAt = -1f;
         float _aimLiftAt = -1f;
+
+        // Press grace (T-468). When the first key of an aim went down and it started waiting for a
+        // second, and the way that first key points. Negative when nothing is waiting.
+        float _aimPressAt = -1f;
+        Vector2 _aimPressed;
 
         /// <summary>
         /// On the frame the aim is released, the aim it was released from, which the release grace
@@ -518,6 +535,7 @@ namespace TakoBoyStudios.TopDown2D
 
             _shootDirection = Vector2.zero;
             _heldAim = Vector2.zero;
+            _aimPressAt = -1f;
             _jumpBufferTimer = 0f;
             _airborne = false;
             ResetWalk();
@@ -1093,6 +1111,7 @@ namespace TakoBoyStudios.TopDown2D
                     // Cannot act: forget any buffered jump and stop shooting this frame.
                     _shootDirection = Vector2.zero;
                     _heldAim = Vector2.zero;
+                    _aimPressAt = -1f;
                     _jumpBufferTimer = 0f;
                     _airborne = false;
 
@@ -1387,6 +1406,39 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         /// <summary>
+        /// The press grace (T-468), the aim only. True while the start of an aim should wait: nothing
+        /// was being aimed, <paramref name="snapped"/> is a cardinal on keys or buttons, and it has
+        /// waited no longer than <see cref="pressGrace"/>. A second key inside that makes a diagonal,
+        /// which ends the wait and starts the aim there; past it, the one key starts the aim on its
+        /// own. Remembers the cardinal so a tap released mid-wait can still fire it.
+        ///
+        /// The walk has no press grace. A press skew only costs it one frame of facing, and a walk
+        /// that set off upward still facing whatever it faced before would look worse than that.
+        /// </summary>
+        bool HoldForPress(Vector2 snapped)
+        {
+            bool cardinal = Mathf.Abs(snapped.x) < 0.1f || Mathf.Abs(snapped.y) < 0.1f;
+            bool starting = _heldAim.sqrMagnitude < 0.0001f;
+
+            if (!starting || !cardinal || !(_shootAction.activeControl is ButtonControl))
+            {
+                _aimPressAt = -1f;
+                return false;
+            }
+
+            if (_aimPressAt < 0f)
+                _aimPressAt = Time.time;
+
+            _aimPressed = snapped;
+
+            if (Time.time - _aimPressAt < pressGrace)
+                return true;
+
+            _aimPressAt = -1f;
+            return false;
+        }
+
+        /// <summary>
         /// Reads the aim and locks it to one of eight directions.
         ///
         /// The snap happens here, at the input, rather than inside the gun. Aiming is a property of
@@ -1405,6 +1457,7 @@ namespace TakoBoyStudios.TopDown2D
             {
                 _heldAim = Vector2.zero;
                 _aimLiftAt = -1f;
+                _aimPressAt = -1f;
                 return;
             }
 
@@ -1412,25 +1465,52 @@ namespace TakoBoyStudios.TopDown2D
 
             if (!Aim.IsAiming(shootInput))
             {
-                // Released: face the aim it was released from. If a pair of keys let go one after the
-                // other, the grace below has kept that on the diagonal the whole time.
-                _aimReleasedFacing = _heldAim;
-                _heldAim = Vector2.zero;
-                _aimLiftAt = -1f;
-                return;
+                // The window check drops a wait left over from before a jump or a throw, since this
+                // only runs while standing and nothing else clears it.
+                if (_aimPressAt >= 0f && Time.time - _aimPressAt <= pressGrace)
+                {
+                    // A tap let go while it was still waiting for a second key. It never got to fire,
+                    // so it fires now, once, the way it pointed; next frame is its release.
+                    _aimPressAt = -1f;
+                    _heldAim = _aimPressed;
+                }
+                else
+                {
+                    // Released: face the aim it was released from. If a pair of keys let go one after
+                    // the other, the release grace has kept that on the diagonal the whole time.
+                    _aimReleasedFacing = _heldAim;
+                    _heldAim = Vector2.zero;
+                    _aimLiftAt = -1f;
+                    _aimPressAt = -1f;
+                    return;
+                }
+            }
+            else
+            {
+                Vector2 snapped = Aim.Snap(shootInput, _heldAim);
+
+                // The key skew on the way down: the first key of a diagonal lands a frame or two
+                // before the second, and the gun fires on the first frame of an aim. Waiting briefly
+                // for the second is what stops a lone bullet going straight up before the diagonal.
+                if (HoldForPress(snapped))
+                {
+                    if (DebugDraw.Enabled)
+                        DebugDraw.Line(Position, (Vector2)Position + snapped * 20f, new Color(1f, 0.7f, 0.2f, 1f));
+                    return;
+                }
+
+                // The same key-lift skew as the walk, and here it costs more than a flicker: the torso
+                // would turn for a frame and the gun could fire a stray shot along the straggler's
+                // cardinal. Held back, the shot keeps going the way the pair pointed.
+                if (!HoldForRelease(_heldAim, snapped, _shootAction, ref _aimLiftAt))
+                    _heldAim = snapped;
             }
 
-            // The same key-lift skew as the walk, and here it costs more than a flicker: the torso
-            // would turn for a frame and the gun could fire a stray shot along the straggler's
-            // cardinal. Held back, the shot keeps going the way the pair pointed.
-            Vector2 snapped = Aim.Snap(shootInput, _heldAim);
-            if (!HoldForRelease(_heldAim, snapped, _shootAction, ref _aimLiftAt))
-                _heldAim = snapped;
             _shootDirection = _heldAim;
 
             if (DebugDraw.Enabled)
             {
-                // The aim being fired along: red, or amber while the grace is holding it.
+                // The aim being fired along: red, or amber while the release grace is holding it.
                 Color aimColour = _aimLiftAt >= 0f ? new Color(1f, 0.7f, 0.2f, 1f) : new Color(1f, 0.3f, 0.3f, 1f);
                 DebugDraw.Line(Position, (Vector2)Position + _heldAim * 20f, aimColour);
             }
