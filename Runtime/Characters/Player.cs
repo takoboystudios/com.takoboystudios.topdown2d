@@ -3,6 +3,7 @@ using TakoBoyStudios.Animation;
 using TakoBoyStudios.Core;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 
 namespace TakoBoyStudios.TopDown2D
 {
@@ -120,10 +121,13 @@ namespace TakoBoyStudios.TopDown2D
 
         [BoxGroup("Walk")]
         [Tooltip(
-            "How long after the last change of direction a full release still counts as releasing the "
-                + "direction before it, in seconds. On a keyboard or d-pad the two keys of a diagonal never "
-                + "lift on the same frame, so without this a diagonal always ends facing whichever key "
-                + "lifted last and no diagonal idle is reachable. Also applied to the aim. About 0.08."
+            "How long a diagonal keeps facing and aiming the diagonal after one of its two keys lifts, in "
+                + "seconds. On a keyboard or d-pad the two keys of a diagonal never lift on the same frame, "
+                + "so letting go always passes through a frame or two of whichever key lifted last. Inside "
+                + "this window that straggler is never shown or fired along, so a diagonal idle is "
+                + "reachable; past it, the single key is a real turn and is taken. A turn from a diagonal "
+                + "to one of its own cardinals is late by at most this much. Sticks are never held back. "
+                + "About 0.08."
         )]
         [SerializeField, MinValue(0f)]
         float releaseGrace = 0.08f;
@@ -143,18 +147,16 @@ namespace TakoBoyStudios.TopDown2D
         float _walkSpeed;
         bool _skidPlayed;
 
-        // Release grace (T-468). The facing a key-lift skew would lose, and when the facing last
-        // changed, for the stick and for the aim separately.
-        Vector2 _facingBeforeChange;
-        float _facingChangedAt = -1f;
-        bool _moveWasHeld;
-        Vector2 _aimBeforeChange;
-        float _aimChangedAt = -1f;
+        // Release grace (T-468). When one key of a diagonal lifted and the diagonal started being held
+        // in place of the straggler, for the stick and for the aim separately. Negative when nothing
+        // is being held back.
+        float _facingLiftAt = -1f;
+        float _aimLiftAt = -1f;
 
         /// <summary>
-        /// On the frame the aim is released, the aim to keep facing: the one held before a change
-        /// inside the grace window, or the last aim otherwise. Zero on every other frame. A character
-        /// reads it to face its idle the way the player was really pointing.
+        /// On the frame the aim is released, the aim it was released from, which the release grace
+        /// keeps on the diagonal when a pair of keys let go one after the other. Zero on every other
+        /// frame. A character reads it to face its idle the way the player was really pointing.
         /// </summary>
         protected Vector2 _aimReleasedFacing;
 
@@ -1220,26 +1222,25 @@ namespace TakoBoyStudios.TopDown2D
             if (eightWayMovement)
                 input = SnapWalkToEight(input);
 
-            // Facing follows the stick the frame it moves, whatever the walk itself is doing.
-            bool held = input.sqrMagnitude > 0.001f;
-            if (held)
+            // Facing follows the stick the frame it moves, whatever the walk itself is doing, except
+            // while the release grace is holding a diagonal whose keys are letting go (T-468). The walk
+            // below still gets the real input either way: only the facing waits.
+            if (input.sqrMagnitude > 0.001f)
             {
-                if (_moveWasHeld && Aim.Snap(input) != Aim.Snap(m_lastMoveDirection))
-                {
-                    _facingBeforeChange = m_lastMoveDirection;
-                    _facingChangedAt = Time.time;
-                }
-                m_lastMoveDirection = input;
+                if (!HoldForRelease(Aim.Snap(m_lastMoveDirection), Aim.Snap(input), _moveAction, ref _facingLiftAt))
+                    m_lastMoveDirection = input;
             }
-            else if (_moveWasHeld)
+            else
             {
-                // Released. If the direction only just changed, the change was the first key of a
-                // pair lifting: face the way the pair pointed, not the straggler.
-                if (_facingChangedAt >= 0f && Time.time - _facingChangedAt <= releaseGrace)
-                    m_lastMoveDirection = _facingBeforeChange;
-                _facingChangedAt = -1f;
+                _facingLiftAt = -1f;
             }
-            _moveWasHeld = held;
+
+            if (DebugDraw.Enabled)
+            {
+                // The facing the body is drawn with: white, or amber while the grace is holding it.
+                Color facingColour = _facingLiftAt >= 0f ? new Color(1f, 0.7f, 0.2f, 1f) : Color.white;
+                DebugDraw.Line(Position, (Vector2)Position + m_lastMoveDirection.normalized * 12f, facingColour);
+            }
 
             StepWalk(input, deltaTime);
         }
@@ -1346,6 +1347,46 @@ namespace TakoBoyStudios.TopDown2D
         protected virtual void PlaySkidVisual(Vector2 direction) { }
 
         /// <summary>
+        /// The release grace (T-468). True while <paramref name="next"/> should be held back and
+        /// <paramref name="held"/> kept, both snapped to eight: <paramref name="held"/> is a diagonal
+        /// on keys or buttons, <paramref name="next"/> is one of its own two cardinals, which is what
+        /// a diagonal looks like with one key lifted, and that has lasted no longer than
+        /// <see cref="releaseGrace"/>.
+        ///
+        /// The two keys of a diagonal never lift on the same frame, so letting go passes through a
+        /// frame or two of the straggler's cardinal. The first fix put the diagonal back once both
+        /// were up, which still drew the cardinal in between: the flicker. Holding it back instead
+        /// means a release inside the window never sees the cardinal at all, and a real turn is taken
+        /// once the window has passed. A stick is never held: released, it springs back through the
+        /// middle along the way it was pointing and does not pass a cardinal.
+        ///
+        /// <paramref name="liftAt"/> is the caller's own timer, negative when nothing is held.
+        /// </summary>
+        bool HoldForRelease(Vector2 held, Vector2 next, InputAction action, ref float liftAt)
+        {
+            bool heldDiagonal = Mathf.Abs(held.x) > 0.1f && Mathf.Abs(held.y) > 0.1f;
+            bool keyLift = heldDiagonal
+                && next != held
+                && Vector2.Dot(held, next) > 0.5f
+                && action.activeControl is ButtonControl;
+
+            if (!keyLift)
+            {
+                liftAt = -1f;
+                return false;
+            }
+
+            if (liftAt < 0f)
+                liftAt = Time.time;
+
+            if (Time.time - liftAt < releaseGrace)
+                return true;
+
+            liftAt = -1f;
+            return false;
+        }
+
+        /// <summary>
         /// Reads the aim and locks it to one of eight directions.
         ///
         /// The snap happens here, at the input, rather than inside the gun. Aiming is a property of
@@ -1363,7 +1404,7 @@ namespace TakoBoyStudios.TopDown2D
             if (InputLocked)
             {
                 _heldAim = Vector2.zero;
-                _aimChangedAt = -1f;
+                _aimLiftAt = -1f;
                 return;
             }
 
@@ -1371,26 +1412,28 @@ namespace TakoBoyStudios.TopDown2D
 
             if (!Aim.IsAiming(shootInput))
             {
-                // Released. The same key-lift skew as the walk: a diagonal aim's second key lifts a
-                // frame after the first, so the last aim seen is a cardinal. Face the pair instead.
-                if (_heldAim.sqrMagnitude > 0.0001f)
-                {
-                    bool justChanged = _aimChangedAt >= 0f && Time.time - _aimChangedAt <= releaseGrace;
-                    _aimReleasedFacing = justChanged ? _aimBeforeChange : _heldAim;
-                }
+                // Released: face the aim it was released from. If a pair of keys let go one after the
+                // other, the grace below has kept that on the diagonal the whole time.
+                _aimReleasedFacing = _heldAim;
                 _heldAim = Vector2.zero;
-                _aimChangedAt = -1f;
+                _aimLiftAt = -1f;
                 return;
             }
 
+            // The same key-lift skew as the walk, and here it costs more than a flicker: the torso
+            // would turn for a frame and the gun could fire a stray shot along the straggler's
+            // cardinal. Held back, the shot keeps going the way the pair pointed.
             Vector2 snapped = Aim.Snap(shootInput, _heldAim);
-            if (_heldAim.sqrMagnitude > 0.0001f && snapped != _heldAim)
-            {
-                _aimBeforeChange = _heldAim;
-                _aimChangedAt = Time.time;
-            }
-            _heldAim = snapped;
+            if (!HoldForRelease(_heldAim, snapped, _shootAction, ref _aimLiftAt))
+                _heldAim = snapped;
             _shootDirection = _heldAim;
+
+            if (DebugDraw.Enabled)
+            {
+                // The aim being fired along: red, or amber while the grace is holding it.
+                Color aimColour = _aimLiftAt >= 0f ? new Color(1f, 0.7f, 0.2f, 1f) : new Color(1f, 0.3f, 0.3f, 1f);
+                DebugDraw.Line(Position, (Vector2)Position + _heldAim * 20f, aimColour);
+            }
 
             if (m_basicGun)
                 m_basicGun.Shoot(_shootDirection);
