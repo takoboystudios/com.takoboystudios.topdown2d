@@ -991,14 +991,17 @@ namespace TakoBoyStudios.TopDown2D
             if (_secondaryUses == 0)
                 return;
 
-            // The same answer the body already uses for which way it is facing: aim first, then
-            // movement, then the direction last faced. Reimplementing it here was a bug once: the old
-            // fallback was a field that started as Vector2.down, so a player standing still and not
-            // aiming always threw south, and the bomb went into the wall below them.
+            // The way the body is drawn facing, asked of the one place that answers it. This used to
+            // ask GetAnimationFacingDirection, whose fallbacks are the walk (the braking move input,
+            // then FacingDirection, which follows the walk too). Letting go of a diagonal on keys, the
+            // straggler key bends the walk toward its cardinal for a frame or two while the release
+            // grace keeps the pose on the diagonal, so from a diagonal idle the throw sometimes went
+            // cardinal (T-486). Before that, the fallback was a field that started as Vector2.down, so
+            // a player standing still threw south into the wall below them.
             //
             // Snapped to eight, like the gun. A throw that could go anywhere would be the only thing
             // in the game that does.
-            _secondaryDirection = Aim.Snap(GetAnimationFacingDirection());
+            _secondaryDirection = Aim.Snap(BodyFacing);
 
             if (_secondaryDirection.sqrMagnitude < 0.0001f)
                 _secondaryDirection = Vector2.down;
@@ -1308,9 +1311,11 @@ namespace TakoBoyStudios.TopDown2D
 
             if (DebugDraw.Enabled)
             {
-                // The facing the body is drawn with: white, or amber while the grace is holding it.
+                // The facing the body is drawn with, which is also the way a Secondary will go: white,
+                // or amber while the grace is holding it. Drawn from BodyFacing, the same answer the
+                // Secondary uses, so the line cannot show one thing while the throw does another.
                 Color facingColour = _facingLiftAt >= 0f ? new Color(1f, 0.7f, 0.2f, 1f) : Color.white;
-                DebugDraw.Line(Position, (Vector2)Position + m_lastMoveDirection.normalized * 12f, facingColour);
+                DebugDraw.Line(Position, (Vector2)Position + BodyFacing.normalized * 12f, facingColour);
             }
 
             StepWalk(input, deltaTime);
@@ -1664,6 +1669,10 @@ namespace TakoBoyStudios.TopDown2D
                     // Rooted for the whole of it. Committing is what makes it cost something.
                     SetMoveDirection(Vector2.zero);
 
+                    // The way it was decided to go, for as long as it plays.
+                    if (DebugDraw.Enabled)
+                        DebugDraw.Line(Position, (Vector2)Position + _secondaryDirection * 20f, new Color(1f, 0.45f, 0.1f, 1f));
+
                     // No clip means nothing to read; leave rather than guess at timings.
                     if (m_entityAnimator == null || string.IsNullOrEmpty(_secondaryClip) || _equippedSecondary == null)
                     {
@@ -1809,6 +1818,18 @@ namespace TakoBoyStudios.TopDown2D
         /// supplies its own jump art; the height and airtime are the motor's arc regardless of the clip.
         /// </summary>
         protected virtual void PlayJumpVisual(Vector2 direction) { }
+
+        /// <summary>
+        /// The way the body is drawn facing right now: the one answer to "which way is he pointing",
+        /// for anything that acts along it (a Secondary) and for the debug facing line. The aim while
+        /// aiming, otherwise the facing the stick decided, release grace included. Never the walk,
+        /// which bends and brakes on its own and so is not where the body is pointing (T-486).
+        ///
+        /// A character whose pose can face somewhere else (Grim idles toward the aim he just let go
+        /// of) overrides this with the same choices its pose makes.
+        /// </summary>
+        protected virtual Vector2 BodyFacing =>
+            _shootDirection.sqrMagnitude > 0.0001f ? _shootDirection : m_lastMoveDirection;
 
         protected override Vector2 GetAnimationFacingDirection()
         {
