@@ -76,8 +76,18 @@ namespace TakoBoyStudios.TopDown2D
 
         void LateUpdate()
         {
+            // World mode: re-sort from y every frame while playing. This used to return here, so a
+            // world-mode sorter only ever sorted once, in Awake: a walking enemy kept the order it
+            // spawned with, and a pooled shot or effect kept the order of wherever the pool built it,
+            // which is how "sorts by y" kept coming back as "sorts wrongly in the next room" (T-485).
+            // UpdateSortingOrder only writes when the number changes, so a body standing still costs
+            // a multiply and a compare.
             if (referenceTilemap == null)
+            {
+                if (Application.isPlaying)
+                    UpdateSortingOrder();
                 return;
+            }
 
             Vector2 updatedPosition = transform.position + new Vector3(0, bottomPivotOffset);
             Vector3Int currentCell = referenceTilemap.WorldToCell(updatedPosition);
