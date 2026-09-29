@@ -113,6 +113,27 @@ namespace TakoBoyStudios.TopDown2D
             _lines.Add(new Line2(from, to, thickness, color));
         }
 
+        /// <summary>
+        /// A circle outline, as a ring of short lines. For anything that decides by distance rather than
+        /// by a box: a shockwave's reach, a radius something is waiting to be inside.
+        /// </summary>
+        public static void Circle(Vector2 center, float radius, Color color, int segments = 24)
+        {
+            if (!_enabled || radius <= 0f)
+                return;
+
+            segments = Mathf.Max(8, segments);
+            float step = Mathf.PI * 2f / segments;
+            Vector2 previous = center + new Vector2(radius, 0f);
+            for (int i = 1; i <= segments; i++)
+            {
+                float angle = step * i;
+                Vector2 next = center + new Vector2(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius);
+                Line(previous, next, color, 1f);
+                previous = next;
+            }
+        }
+
         /// <summary>A cross, for a point that has no size of its own.</summary>
         public static void Cross(Vector2 at, float size, Color color)
         {

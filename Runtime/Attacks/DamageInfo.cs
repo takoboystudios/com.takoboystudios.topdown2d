@@ -94,6 +94,15 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public int GetHitLagFrames() => IsValid ? (int)(GetFinalDamage() / (float)DamageValues.HitDamage * 0.333f + 1f) : 0;
 
+        /// <summary>True when this hit shoves (T-480) rather than adding the older impulse.</summary>
+        public bool Shoves => IsValid && values.shoveDistance > 0f && values.shoveTime > 0f;
+
+        /// <summary>
+        /// The freeze a shove needs, in frames: the whole of the shove, so the target's AI is paused
+        /// for exactly as long as it is being pushed. Zero for a hit that does not shove.
+        /// </summary>
+        public int GetShoveFreezeFrames() => Shoves ? Mathf.CeilToInt(values.shoveTime * 60f) : 0;
+
         /// <summary>How long the victim is locked after the freeze. Follows the shove, not the damage.</summary>
         public int GetHitStunFrames() => IsValid ? (int)(values.knockback * 0.4f) : 0;
 

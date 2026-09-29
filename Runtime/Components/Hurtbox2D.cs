@@ -73,6 +73,21 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, MinValue(1), ShowIf("@!HasBehavior(DamageBoxBehavior.HitMultipleTimes)")]
         int maxTargets = 1;
 
+        [BoxGroup("Area")]
+        [Tooltip(
+            "For an area hit (an explosion, a shockwave): hit everything whose hitbox is within this "
+                + "many pixels of the box's centre, instead of everything inside the box. 0 uses the box. "
+                + "A ring drawn on the floor wants a circle, because a square box reaches further on the "
+                + "diagonals than the art shows. Grim's guitar shockwave is 24: one tile past his body."
+        )]
+        [SerializeField, MinValue(0f)]
+        float areaRadius;
+
+        /// <summary>The circle an area hit uses, in pixels, or 0 when it uses the box.</summary>
+        public float AreaRadius => areaRadius;
+
+        static readonly Color AreaColor = new Color(1f, 0.45f, 0.1f, 1f);
+
         [BoxGroup("Height")]
         [Tooltip(
             "Ground: passes under a target that has jumped above the clearance height (a bullet keeps "
@@ -180,10 +195,17 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>The wall box, drawn in the Scene view whenever this hurtbox is selected, so it can be authored by eye.</summary>
         protected override void DrawExtraGizmos()
         {
+            Gizmos.matrix = Matrix4x4.identity;
+
+            if (areaRadius > 0f)
+            {
+                Gizmos.color = AreaColor;
+                Gizmos.DrawWireSphere((Vector2)transform.position + (Vector2)Center, areaRadius);
+            }
+
             if (!separateWallBox)
                 return;
 
-            Gizmos.matrix = Matrix4x4.identity;
             Gizmos.color = WallBoxColor;
             Gizmos.DrawWireCube((Vector2)transform.position + wallBoxCenter, wallBoxSize);
         }
@@ -350,26 +372,41 @@ namespace TakoBoyStudios.TopDown2D
         public int CheckArea(Vector2 centerPos)
         {
             _areaResults.Clear();
-            int count = Physics2D.OverlapBox(
-                centerPos + (Vector2)Center,
-                Size,
-                0f,
-                _targetFilter,
-                _areaResults
-            );
+            Vector2 areaCenter = centerPos + (Vector2)Center;
+
+            // A circle when one is set, which is what a ring on the floor means. The overlay draws
+            // the same circle the query uses, so what Shift+D shows is what hits.
+            int count;
+            if (areaRadius > 0f)
+            {
+                count = Physics2D.OverlapCircle(areaCenter, areaRadius, _targetFilter, _areaResults);
+                DebugDraw.Circle(areaCenter, areaRadius, AreaColor);
+            }
+            else
+            {
+                count = Physics2D.OverlapBox(areaCenter, Size, 0f, _targetFilter, _areaResults);
+            }
 
             if (count == 0)
                 return 0;
 
             int hits = 0;
-            foreach (var collider in _areaResults)
+            for (int i = 0; i < count; i++)
             {
-                Hitbox2D hitbox = collider.GetComponent<Hitbox2D>();
+                Hitbox2D hitbox = _areaResults[i].GetComponent<Hitbox2D>();
                 if (hitbox == null || !CanDamage(hitbox))
                     continue;
 
-                Vector2 direction = ((Vector2)hitbox.transform.position - centerPos).normalized;
+                // Straight out from the centre of the blast: each target's hitbox against the centre
+                // the area was cast from. A target exactly on the centre has no direction of its own
+                // and used to get no push at all; it now goes south, toward the camera, where the
+                // player can see it land.
+                Vector2 away = (Vector2)hitbox.transform.position - areaCenter;
+                Vector2 direction = away.sqrMagnitude > 0.0001f ? away.normalized : Vector2.down;
                 HitEvent hitEvent = BuildHitEventForArea(centerPos, direction, hitbox);
+
+                // What it decided: a line from the centre along each push.
+                DebugDraw.Line(areaCenter, areaCenter + direction * (areaRadius > 0f ? areaRadius : 16f), AreaColor, 1f);
 
                 hitbox.Hit(hitEvent);
                 _totalHits++;

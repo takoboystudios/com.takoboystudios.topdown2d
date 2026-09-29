@@ -449,6 +449,13 @@ namespace TakoBoyStudios.TopDown2D
         // and SetJumpInput moved to PhysicsEntity with the input fields they write.
         public virtual void AddImpulse(Vector2 impulse) { }
 
+        /// <summary>
+        /// A shove (T-480): carried <paramref name="distance"/> pixels along <paramref name="direction"/>
+        /// over <paramref name="duration"/> seconds, taking over the body's own movement while it runs.
+        /// No-op on a static Entity, which cannot be moved; real on PhysicsEntity.
+        /// </summary>
+        public virtual void Shove(Vector2 direction, float distance, float duration) { }
+
         public void SetVelocityInLastDirection(float speed)
         {
             // Convert to impulse to respect motor slide and collision
@@ -610,14 +617,19 @@ namespace TakoBoyStudios.TopDown2D
                 return;
             }
 
-            // Apply knockback
-            AddImpulse(knockback);
+            // Apply knockback. A hit that shoves (T-480) replaces the older impulse outright: the two
+            // are different models of the same push, and summing them would be neither.
+            bool shoves = info.Shoves;
+            if (shoves)
+                Shove(info.knockbackDirection, info.values.shoveDistance, info.values.shoveTime);
+            else
+                AddImpulse(knockback);
 
             // Forced movement from a hit is a Displacement, which is what Bleed pays off on and what
             // a displacement-triggered Perk fires from. Walking is not this, and neither is a dash:
             // both go through AddImpulse without a hit behind them, which is why this lives here and
             // not there. A status's own damage carries no knockback, so a burn cannot pop bleed.
-            if (knockback.sqrMagnitude > 0f)
+            if (shoves || knockback.sqrMagnitude > 0f)
             {
                 Status.StatusHolder statuses = Statuses;
                 if (statuses != null)
@@ -627,9 +639,11 @@ namespace TakoBoyStudios.TopDown2D
                 }
             }
 
-            // Apply hitstun/hitlag
-            if (Grounded)
-                StartHitLag(info.GetHitLagFrames());
+            // Apply hitstun/hitlag. A shove freezes the target for the whole push, so its AI cannot
+            // steer against it and its pose holds while it slides, which is most of what makes the
+            // push read. The push itself runs in the physics step, which the freeze does not pause.
+            if (Grounded || shoves)
+                StartHitLag(Mathf.Max(info.GetHitLagFrames(), info.GetShoveFreezeFrames()));
 
             // Trigger effects
             OnTakeDamage?.Invoke(hitEvent);

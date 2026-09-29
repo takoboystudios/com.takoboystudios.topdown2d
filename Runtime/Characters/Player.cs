@@ -11,7 +11,9 @@ namespace TakoBoyStudios.TopDown2D
     {
         Jump = EntityState.Custom,
         Damaged,
-        Throwing,
+
+        /// <summary>Using the equipped Secondary: the bomb throw, the guitar strum. Rooted until the art finishes.</summary>
+        Secondary,
         Reviving,
     }
 
@@ -188,39 +190,15 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, MinValue(0f)]
         float jumpBuffer = 0.10f;
 
-        [BoxGroup("Throw")]
-        [Tooltip("What gets thrown. Leave empty on a character who cannot throw and the input does nothing.")]
+        [BoxGroup("Secondary")]
+        [Tooltip(
+            "The Secondaries this character can have in the grip slot: the Bomb, the Guitar Riff. The "
+                + "first is what they start a run with, until the Tavern's equip screen exists; the debug "
+                + "overlay cycles through the rest (G in the Debug Arena). Empty for a character with no "
+                + "Secondary, and the button does nothing."
+        )]
         [SerializeField]
-        Bomb bombPrefab;
-
-        [BoxGroup("Throw")]
-        [Tooltip(
-            "How far along the aim it lands, in pixels. A bomb goes to a spot rather than off in a "
-                + "direction, so this is the whole of its range. The encounter frame is 256 wide, so "
-                + "about 90 lands it comfortably inside a fight without reaching across one."
-        )]
-        [SerializeField, MinValue(0f)]
-        float throwDistance = 90f;
-
-        [BoxGroup("Throw")]
-        [Tooltip(
-            "Which frame of the throw animation the bomb leaves the hand on. The clip opens with a "
-                + "240ms wind up and ends in a follow through, so 2 is the moment the arm comes "
-                + "through. Read off the animation rather than timed beside it, so what you see and "
-                + "what the game does cannot drift apart."
-        )]
-        [SerializeField, MinValue(0)]
-        int throwReleaseFrame = 2;
-
-        [BoxGroup("Throw")]
-        [Tooltip("How many bombs can be in the air at once. Fixed and pre-warmed, so a throw never allocates.")]
-        [SerializeField, MinValue(1)]
-        int bombPoolSize = 8;
-
-        [BoxGroup("Throw")]
-        [Tooltip("How many bombs the player starts with. Each throw spends one; at zero the throw does nothing until they are refilled. The player begins a run with 3.")]
-        [SerializeField, MinValue(0)]
-        int startingBombs = 3;
+        SecondaryDefinition[] secondaries;
 
         [BoxGroup("Hurt")]
         [Tooltip("Phase 1, the frozen reaction: seconds with motion locked, input ignored and the damaged clip playing. Cannot be hit. ~0.35s.")]
@@ -266,18 +244,70 @@ namespace TakoBoyStudios.TopDown2D
         InputAction _moveAction;
         InputAction _shootAction;
         InputAction _jumpAction;
-        InputAction _bombAction;
+        InputAction _secondaryAction;
 
-        Vector2 _throwDirection = Vector2.down;
+        Vector2 _secondaryDirection = Vector2.down;
 
-        /// <summary>Whether the throw clip has been seen at frame 0, so its frames may be counted. See StateThrowing.</summary>
-        bool _throwStarted;
-        bool _thrown;
+        /// <summary>Whether the Secondary's clip has been seen at frame 0, so its frames may be counted. See StateSecondary.</summary>
+        bool _secondaryStarted;
+        bool _secondaryReleased;
 
-        int _bombsRemaining;
+        // Per player, never on the shared definition: two Grims carrying the Bomb each have their own
+        // count. Negative means the equipped Secondary never runs out.
+        SecondaryDefinition _equippedSecondary;
+        int _secondaryUses;
 
-        /// <summary>Bombs left to throw. The HUD's grip slot counts down off this.</summary>
-        public int BombsRemaining => _bombsRemaining;
+        /// <summary>The Secondary in the grip slot, or null for a character with none.</summary>
+        public SecondaryDefinition EquippedSecondary => _equippedSecondary;
+
+        /// <summary>Uses left of the equipped Secondary. Negative when it never runs out. The HUD's grip slot counts down off this.</summary>
+        public int SecondaryUses => _secondaryUses;
+
+        /// <summary>How many Secondaries this character can equip. Walk them with <see cref="SecondaryAt"/>.</summary>
+        public int SecondaryCount => secondaries != null ? secondaries.Length : 0;
+
+        /// <summary>One of the Secondaries this character can equip, by index.</summary>
+        public SecondaryDefinition SecondaryAt(int index) => secondaries[index];
+
+        /// <summary>
+        /// Puts a Secondary in the grip slot with a fresh supply of uses. Equipping is a choice made
+        /// before a run (the Tavern), so a fresh supply is right; the debug overlay uses the same
+        /// call, which is also how a test refills. Its pools were built at Init, so this allocates
+        /// nothing. A Secondary this character does not list is refused, because nothing pooled it.
+        /// </summary>
+        public bool EquipSecondary(SecondaryDefinition secondary)
+        {
+            if (secondary != null && IndexOfSecondary(secondary) < 0)
+            {
+                Debug.LogWarning($"[Player] {name} cannot equip '{secondary.name}': it is not in this character's Secondaries list.", this);
+                return false;
+            }
+
+            _equippedSecondary = secondary;
+            _secondaryUses = secondary != null ? secondary.Uses : 0;
+            return true;
+        }
+
+        /// <summary>Equips the next Secondary in the list, wrapping round. For testing; the real choice is made in the Tavern.</summary>
+        public void CycleSecondary()
+        {
+            int count = SecondaryCount;
+            if (count == 0)
+                return;
+
+            int next = (IndexOfSecondary(_equippedSecondary) + 1) % count;
+            EquipSecondary(secondaries[next]);
+        }
+
+        int IndexOfSecondary(SecondaryDefinition secondary)
+        {
+            for (int i = 0; i < SecondaryCount; i++)
+            {
+                if (secondaries[i] == secondary)
+                    return i;
+            }
+            return -1;
+        }
 
         /// <summary>
         /// While set, no input reaches the player: no movement, aim, jump or bomb. Held from death
@@ -297,7 +327,7 @@ namespace TakoBoyStudios.TopDown2D
         /// pushing the UI map, which turns the gameplay map off entirely, and the whole point of an
         /// in-world choice is that the player keeps walking, aiming and dodging while they make it.
         ///
-        /// Optional, the same as Bomb: an older input asset without the action leaves this null and
+        /// Optional, the same as the Secondary's action: an older input asset without the action leaves this null and
         /// anything asking for it simply never fires.
         /// </summary>
         public InputAction InteractAction
@@ -421,8 +451,8 @@ namespace TakoBoyStudios.TopDown2D
             _skidPlayed = false;
         }
 
-        /// <summary>The clip the character put on for this throw, so its frames are read and nothing else's.</summary>
-        string _throwClip;
+        /// <summary>The clip the character put on for this use of the Secondary, so its frames are read and nothing else's.</summary>
+        string _secondaryClip;
 
         protected Vector2 _shootDirection;
 
@@ -456,23 +486,20 @@ namespace TakoBoyStudios.TopDown2D
             _shootAction = _playerInput.actions["Shoot"];
             _jumpAction = _playerInput.actions["Jump"];
 
-            // Optional so an older input asset without the action does not throw on load; the throw
-            // simply does nothing until the binding exists.
-            _bombAction = _playerInput.actions.FindAction("Bomb");
+            // The Secondary's button. Still called "Bomb" in the input asset, because the bomb was the
+            // only thing on it when it was bound. Optional so an older input asset without the action
+            // does not throw on load; the button simply does nothing until the binding exists.
+            _secondaryAction = _playerInput.actions.FindAction("Bomb");
 
-            // Nothing else creates this one. Enemy projectiles get their pools from the wave runner
-            // that spawns them, and a bomb builds its own explosion pool, but the player's own bomb has
-            // no such owner: without this, Acquire returns null and the throw silently does nothing.
-            if (bombPrefab != null && PoolManager.Instance != null)
-            {
-                PoolManager.Instance.CreatePool(
-                    bombPrefab.name,
-                    bombPrefab.gameObject,
-                    new PoolConfig(bombPoolSize, bombPoolSize, grow: 0, autoGrow: false)
-                );
-            }
+            // Every Secondary this character could equip is pooled now, at setup, so swapping one in
+            // later (the Tavern, the debug key) never builds anything mid-run. Nothing else creates
+            // these: enemy projectiles get their pools from the wave runner that spawns them, but the
+            // player's own bomb and shockwave have no such owner, and without this Acquire returns
+            // null and the button silently does nothing.
+            for (int i = 0; i < SecondaryCount; i++)
+                PoolSecondary(secondaries[i]);
 
-            _bombsRemaining = startingBombs;
+            EquipSecondary(SecondaryCount > 0 ? secondaries[0] : null);
 
             if (m_basicGun)
                 m_basicGun.Init(this);
@@ -506,8 +533,32 @@ namespace TakoBoyStudios.TopDown2D
             base.AddStates();
             m_fsm.AddState(StateJump);
             m_fsm.AddState(StateDamaged);
-            m_fsm.AddState(StateThrowing);
+            m_fsm.AddState(StateSecondary);
             m_fsm.AddState(StateReviving);
+        }
+
+        /// <summary>Pre-warms everything a Secondary spawns. Fixed size, so a use never allocates. Setup only.</summary>
+        static void PoolSecondary(SecondaryDefinition secondary)
+        {
+            if (secondary == null)
+                return;
+
+            CreateFixedPool(secondary.BombPrefab != null ? secondary.BombPrefab.gameObject : null, secondary.BombPoolSize);
+            CreateFixedPool(secondary.ShockwavePrefab != null ? secondary.ShockwavePrefab.gameObject : null, secondary.ShockwavePoolSize);
+            CreateFixedPool(secondary.NotePrefab != null ? secondary.NotePrefab.gameObject : null, secondary.NotePoolSize);
+        }
+
+        /// <summary>
+        /// A fixed-size, pre-warmed pool. Skipped when one already exists under that name, which is
+        /// the normal case for a second player carrying the same Secondary: the pools are shared, and
+        /// asking twice would only log a warning.
+        /// </summary>
+        static void CreateFixedPool(GameObject prefab, int size)
+        {
+            if (prefab == null || PoolManager.Instance == null || PoolManager.Instance.HasPool(prefab.name))
+                return;
+
+            PoolManager.Instance.CreatePool(prefab.name, prefab, new PoolConfig(size, size, grow: 0, autoGrow: false));
         }
 
         /// <summary>
@@ -863,7 +914,7 @@ namespace TakoBoyStudios.TopDown2D
             HandleMovementInput(deltaTime);
             HandleAttackInput();
             HandleJumpInput();
-            HandleThrowInput();
+            HandleSecondaryInput();
         }
 
         #region Scripted walk
@@ -923,34 +974,35 @@ namespace TakoBoyStudios.TopDown2D
         #endregion
 
         /// <summary>
-        /// Starts a throw on the press, aimed where the player is aiming.
+        /// Uses the equipped Secondary on the press, aimed where the player is aiming.
         ///
-        /// Aim, not movement, on purpose: the throw commits to where you are pointing, so a player can
-        /// back away from a fight and still put a bomb into it. Falls back to the last facing when nothing is held, so a
-        /// standing player throws where they are looking rather than nowhere.
+        /// Aim, not movement, on purpose: a bomb commits to where you are pointing, so a player can
+        /// back away from a fight and still put one into it. Falls back to the last facing when nothing
+        /// is held, so a standing player throws where they are looking rather than nowhere. A Secondary
+        /// that throws nothing (a shockwave alone) still faces this way, so its art points somewhere.
         /// </summary>
-        void HandleThrowInput()
+        void HandleSecondaryInput()
         {
-            if (InputLocked || _bombAction == null || bombPrefab == null || !_bombAction.WasPressedThisFrame())
+            if (InputLocked || _secondaryAction == null || _equippedSecondary == null || !_secondaryAction.WasPressedThisFrame())
                 return;
 
-            // Out of bombs: no throw and no wind-up, so an empty grip reads as empty rather than
-            // miming a throw that produces nothing.
-            if (_bombsRemaining <= 0)
+            // Out of uses: nothing, not even the wind-up, so an empty grip reads as empty rather than
+            // miming something that produces nothing.
+            if (_secondaryUses == 0)
                 return;
 
             // The same answer the body already uses for which way it is facing: aim first, then
-            // movement, then the direction last faced. Reimplementing it here was the bug: the old
+            // movement, then the direction last faced. Reimplementing it here was a bug once: the old
             // fallback was a field that started as Vector2.down, so a player standing still and not
             // aiming always threw south, and the bomb went into the wall below them.
             //
             // Snapped to eight, like the gun. A throw that could go anywhere would be the only thing
             // in the game that does.
-            _throwDirection = Aim.Snap(GetAnimationFacingDirection());
+            _secondaryDirection = Aim.Snap(GetAnimationFacingDirection());
 
-            if (_throwDirection.sqrMagnitude < 0.0001f)
-                _throwDirection = Vector2.down;
-            m_fsm.ChangeState((int)PlayerState.Throwing);
+            if (_secondaryDirection.sqrMagnitude < 0.0001f)
+                _secondaryDirection = Vector2.down;
+            m_fsm.ChangeState((int)PlayerState.Secondary);
         }
 
         /// <summary>
@@ -1548,7 +1600,7 @@ namespace TakoBoyStudios.TopDown2D
             // doing, which is exactly why it cannot be left to a function that reads the body.
             if (m_fsm.CurrentState == (int)PlayerState.Jump
                 || m_fsm.CurrentState == (int)PlayerState.Damaged
-                || m_fsm.CurrentState == (int)PlayerState.Throwing
+                || m_fsm.CurrentState == (int)PlayerState.Secondary
                 || m_fsm.CurrentState == (int)PlayerState.Reviving
                 || IsDead)
             {
@@ -1578,87 +1630,108 @@ namespace TakoBoyStudios.TopDown2D
         protected virtual void UpdateCharacterAnimation() { }
 
         /// <summary>
-        /// Throwing. Grim plants, winds up, and the bomb leaves his hand on the frame the art opens it.
+        /// Using the Secondary. Grim plants, winds up, and on the frame the art lands (the arm coming
+        /// through on the throw, the strum hitting the strings) everything the Secondary does happens
+        /// at once: the bomb leaves, the shockwave goes out, the notes burst.
         ///
         /// The release is read off the animation rather than run on a timer beside it, so the thing the
         /// player sees and the thing the game does cannot drift apart. Same principle as the Gob Grunt's
         /// charge under T-236, and the same trap avoided: the frame counter reports whichever clip is
-        /// playing, so it waits to see the throw clip at frame 0 before counting its frames. Without
-        /// that, whatever was playing a moment ago decides when the bomb leaves.
+        /// playing, so it waits to see the Secondary's clip at frame 0 before counting its frames.
+        /// Without that, whatever was playing a moment ago decides when the bomb leaves.
         /// </summary>
-        void StateThrowing(Fsm.StateStep step, float deltaTime)
+        void StateSecondary(Fsm.StateStep step, float deltaTime)
         {
             switch (step)
             {
                 case Fsm.StateStep.Enter:
                     ResetWalk();
                     SetMoveDirection(Vector2.zero);
-                    _throwStarted = false;
-                    _thrown = false;
-                    PlayThrowVisual(_throwDirection);
+                    _secondaryStarted = false;
+                    _secondaryReleased = false;
+                    bool played = PlaySecondaryVisual(_equippedSecondary, _secondaryDirection);
 
                     // Remember which clip the character actually put on, so everything below can ask
                     // about that one rather than about "whatever is playing". Without this the state
                     // reads the clip it replaced: the walk was on frame 0 and already finished, so the
                     // bomb left on the first frame and the throw ended before it had drawn anything.
-                    _throwClip = m_entityAnimator != null ? m_entityAnimator.CurrentAnimationName : null;
+                    // No art for this Secondary means no clip at all, and the state leaves at once
+                    // rather than timing itself off a looping idle that never finishes.
+                    _secondaryClip = played && m_entityAnimator != null ? m_entityAnimator.CurrentAnimationName : null;
                     break;
 
                 case Fsm.StateStep.Update:
-                    // Rooted for the throw. Committing to it is what makes it cost something.
+                    // Rooted for the whole of it. Committing is what makes it cost something.
                     SetMoveDirection(Vector2.zero);
 
-                    // No clip means no throw to read; leave rather than guess at timings.
-                    if (m_entityAnimator == null || string.IsNullOrEmpty(_throwClip))
+                    // No clip means nothing to read; leave rather than guess at timings.
+                    if (m_entityAnimator == null || string.IsNullOrEmpty(_secondaryClip) || _equippedSecondary == null)
                     {
                         m_fsm.ChangeState((int)EntityState.Idle);
                         break;
                     }
 
-                    // Only ever judge the throw clip itself.
-                    if (m_entityAnimator.CurrentAnimationName != _throwClip)
+                    // Only ever judge the Secondary's own clip.
+                    if (m_entityAnimator.CurrentAnimationName != _secondaryClip)
                         break;
 
-                    _throwStarted = true;
+                    _secondaryStarted = true;
 
-                    if (!_thrown && m_entityAnimator.CurrentFrame >= throwReleaseFrame)
+                    if (!_secondaryReleased && m_entityAnimator.CurrentFrame >= _equippedSecondary.ReleaseFrame)
                     {
-                        _thrown = true;
-                        ReleaseBomb();
+                        _secondaryReleased = true;
+                        ReleaseSecondary(_equippedSecondary);
                     }
 
-                    // Back to normal once the follow-through has played out. The bomb has long since
-                    // left by then, so the tail is purely the recovery the art draws.
-                    if (_throwStarted && m_entityAnimator.IsDone)
+                    // Back to normal once the follow-through has played out. Everything has long since
+                    // gone out by then, so the tail is purely the recovery the art draws.
+                    if (_secondaryStarted && m_entityAnimator.IsDone)
                         m_fsm.ChangeState((int)EntityState.Idle);
                     break;
             }
         }
 
         /// <summary>
-        /// Puts a bomb in the air, aimed a fixed distance along the throw direction.
+        /// Everything the Secondary does on its release frame. Each part is optional and skipped when
+        /// the definition leaves it empty. A use is spent if anything actually went out, so a missing
+        /// pool never eats a count; the gate in HandleSecondaryInput keeps it from going below zero.
+        /// </summary>
+        void ReleaseSecondary(SecondaryDefinition secondary)
+        {
+            bool spent = false;
+            spent |= ThrowSecondaryBomb(secondary);
+            spent |= SpawnSecondaryShockwave(secondary);
+            SpawnSecondaryNotes(secondary);
+
+            if (spent && _secondaryUses > 0)
+                _secondaryUses--;
+        }
+
+        /// <summary>
+        /// Puts the Secondary's bomb in the air, aimed a fixed distance along the aim.
         ///
         /// A fixed distance rather than at the nearest enemy: a bomb that homed would remove the aiming
         /// from a weapon whose whole cost is that you have to place it, and the eight-direction aim is
         /// already the thing that makes positioning the skill.
         /// </summary>
-        void ReleaseBomb()
+        bool ThrowSecondaryBomb(SecondaryDefinition secondary)
         {
-            if (bombPrefab == null || PoolManager.Instance == null)
-                return;
+            Bomb prefab = secondary.BombPrefab;
+            if (prefab == null || PoolManager.Instance == null)
+                return false;
 
-            GameObject spawned = PoolManager.Instance.Acquire(bombPrefab.name, Position, Quaternion.identity);
+            GameObject spawned = PoolManager.Instance.Acquire(prefab.name, Position, Quaternion.identity);
             if (spawned == null)
             {
                 // Loud, because the failure is otherwise invisible: the animation plays in full and
                 // simply nothing comes out of it.
-                Debug.LogError($"[Player] No '{bombPrefab.name}' available to throw; the pool is missing or spent.", this);
-                return;
+                Debug.LogError($"[Player] No '{prefab.name}' available to throw; the pool is missing or spent.", this);
+                return false;
             }
 
             Bomb bomb = spawned.GetComponentInChildren<Bomb>(true);
             if (bomb == null)
-                return;
+                return false;
 
             bomb.Init();
 
@@ -1666,19 +1739,70 @@ namespace TakoBoyStudios.TopDown2D
             // already stamp theirs; the player's throw was the one that did not.
             bomb.Instigator = this;
             bomb.Position = Position;
-            bomb.Lob((Vector2)Position + _throwDirection.normalized * throwDistance);
-
-            // Spend the bomb only once one is actually in the air, so a missing pool never eats a
-            // count. The gate in HandleThrowInput keeps this from going negative.
-            if (_bombsRemaining > 0)
-                _bombsRemaining--;
+            bomb.Lob((Vector2)Position + _secondaryDirection.normalized * secondary.ThrowDistance);
+            return true;
         }
 
         /// <summary>
-        /// Play the throw, facing <paramref name="direction"/>. Empty here so each character supplies its
-        /// own art; the timing and the projectile are the same whoever is throwing.
+        /// The shockwave, at the feet. It is an Effect: its art is the ring on the floor and its damage
+        /// box is the hit and the shove, so everything about how far it reaches and how hard it pushes
+        /// is on that prefab, where the ring is.
         /// </summary>
-        public virtual void PlayThrowVisual(Vector2 direction) { }
+        bool SpawnSecondaryShockwave(SecondaryDefinition secondary)
+        {
+            Effect prefab = secondary.ShockwavePrefab;
+            if (prefab == null || PoolManager.Instance == null)
+                return false;
+
+            GameObject spawned = PoolManager.Instance.Acquire(prefab.name, Position, Quaternion.identity);
+            if (spawned == null)
+            {
+                Debug.LogError($"[Player] No '{prefab.name}' shockwave available; the pool is missing or spent.", this);
+                return false;
+            }
+
+            // Kills in it are this player's, the same as a bomb's blast (T-328).
+            Entity wave = spawned.GetComponent<Entity>();
+            if (wave != null)
+                wave.Instigator = this;
+            return true;
+        }
+
+        /// <summary>
+        /// Notes thrown out in a ring from the body, evenly spaced with a little wobble and the whole
+        /// ring turned at random, so no two strums look stamped. Cosmetic: never spends a use.
+        /// </summary>
+        void SpawnSecondaryNotes(SecondaryDefinition secondary)
+        {
+            DriftEffect prefab = secondary.NotePrefab;
+            int count = secondary.NoteCount;
+            if (prefab == null || count <= 0 || PoolManager.Instance == null)
+                return;
+
+            float step = 360f / count;
+            float turn = Random.Range(0f, step);
+            for (int i = 0; i < count; i++)
+            {
+                GameObject spawned = PoolManager.Instance.Acquire(prefab.name, Position, Quaternion.identity);
+                if (spawned == null)
+                    return; // cosmetic, and a full pool means plenty of notes are already out
+
+                float degrees = turn + step * i + Random.Range(-secondary.NoteJitter, secondary.NoteJitter);
+                float radians = degrees * Mathf.Deg2Rad;
+
+                DriftEffect note = spawned.GetComponent<DriftEffect>();
+                if (note != null)
+                    note.Launch(new Vector2(Mathf.Cos(radians), Mathf.Sin(radians)));
+            }
+        }
+
+        /// <summary>
+        /// Play the Secondary's animation, facing <paramref name="direction"/>, and say whether a clip
+        /// went on. Empty here so each character supplies its own art; the timing and what comes out
+        /// are the same whoever uses it. False, the default, means this character has no art for it,
+        /// and the Secondary does nothing.
+        /// </summary>
+        protected virtual bool PlaySecondaryVisual(SecondaryDefinition secondary, Vector2 direction) => false;
 
         /// <summary>
         /// Play the leap pose at takeoff, facing <paramref name="direction"/>. Empty here so each character
@@ -1736,6 +1860,7 @@ namespace TakoBoyStudios.TopDown2D
             {
                 (int)PlayerState.Jump => "Jump",
                 (int)PlayerState.Damaged => "Damaged",
+                (int)PlayerState.Secondary => "Secondary",
                 (int)PlayerState.Reviving => "Reviving",
                 (int)EntityState.Idle => "Idle",
                 (int)EntityState.Dead => "Dead",

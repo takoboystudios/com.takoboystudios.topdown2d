@@ -49,6 +49,15 @@ namespace TakoBoyStudios.TopDown2D
         // Additive velocity from knockback, dashes and scripted pushes.
         protected Vector2 m_impulseVelocity;
 
+        // A shove in progress (T-480): the velocity it started at and how long it has left. While it
+        // runs it replaces the body's own movement, slowing linearly to a stop.
+        Vector2 _shoveVelocity;
+        float _shoveRemaining;
+        float _shoveTotal;
+
+        /// <summary>True while a shove is carrying this body.</summary>
+        public bool IsBeingShoved => _shoveRemaining > 0f;
+
         // A subclass that decides its own facing (the player, from the stick) sets this so the
         // physics tick stops overwriting m_lastMoveDirection with the integrated move input.
         protected bool m_ownsLastMoveDirection;
@@ -101,8 +110,22 @@ namespace TakoBoyStudios.TopDown2D
 
         protected override void PhysicsTick(float fdt)
         {
-            // Compose desired planar velocity from input and impulse.
-            Vector2 desired = m_moveInput * m_moveSpeed + m_impulseVelocity;
+            // Compose desired planar velocity from input and impulse. A shove replaces both: the body
+            // is being carried, and neither its own steering nor an older push has a say until it
+            // stops. Linear to zero, the same shape the reference's pushes have, so it starts fast
+            // and lands rather than drifting (notes/mina/knockback.md).
+            Vector2 desired;
+            if (_shoveRemaining > 0f)
+            {
+                desired = _shoveVelocity * (_shoveRemaining / _shoveTotal);
+                _shoveRemaining -= fdt;
+                if (DebugDraw.Enabled)
+                    DebugDraw.Line(Position, Position + desired * 0.1f, new Color(1f, 0.45f, 0.1f, 1f));
+            }
+            else
+            {
+                desired = m_moveInput * m_moveSpeed + m_impulseVelocity;
+            }
             bool jumpNow = m_jumpPressed;
             bool jumpHeld = m_jumpHeld;
 
@@ -141,6 +164,7 @@ namespace TakoBoyStudios.TopDown2D
         {
             m_moveInput = Vector2.zero;
             m_impulseVelocity = Vector2.zero;
+            _shoveRemaining = 0f;
         }
 
         // ----------------------------
@@ -165,6 +189,29 @@ namespace TakoBoyStudios.TopDown2D
             // pressed is an edge. The motor buffers, but the edge is still passed once.
             m_jumpPressed |= pressed;
             m_jumpHeld = held;
+        }
+
+        /// <summary>
+        /// Starts a shove (T-480). The speed is worked out so a linear slow-down to a stop covers the
+        /// distance: distance = start speed x duration / 2. A new shove replaces one in progress, and
+        /// clears any older impulse, so two hits never add up to a push nobody authored.
+        ///
+        /// Weight is the resistance. At the default 100 the shove goes as far as the hit says; heavier
+        /// bodies go proportionally less (200 goes half as far). Nothing goes further than authored.
+        /// Not clamped by the impulse cap: every shove starts faster than it on purpose.
+        /// </summary>
+        public override void Shove(Vector2 direction, float distance, float duration)
+        {
+            if (distance <= 0f || duration <= 0f || direction.sqrMagnitude < 0.0001f)
+                return;
+
+            float resistance = m_weight > 100f ? 100f / m_weight : 1f;
+            float speed = 2f * distance * resistance / duration;
+
+            _shoveVelocity = direction.normalized * speed;
+            _shoveRemaining = duration;
+            _shoveTotal = duration;
+            m_impulseVelocity = Vector2.zero;
         }
 
         public override void AddImpulse(Vector2 impulse)

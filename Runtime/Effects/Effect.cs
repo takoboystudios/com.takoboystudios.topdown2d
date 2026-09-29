@@ -33,6 +33,15 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField]
         string animationName = "idle";
 
+        [BoxGroup("Effect")]
+        [Tooltip(
+            "Optional look-alikes of the animation above, one picked at random each time the effect "
+                + "plays: 'idle-1', 'idle-2', 'idle-3'. Several different notes out of one strum read as "
+                + "a burst rather than a stamp. Leave empty to always play the animation above."
+        )]
+        [SerializeField]
+        string[] animationVariants;
+
         [BoxGroup("Damage")]
         [Tooltip(
             "Optional damage box. An explosion has one, a dust puff does not. Leave empty for "
@@ -160,6 +169,8 @@ namespace TakoBoyStudios.TopDown2D
             if (m_entityAnimator == null)
                 return;
 
+            _mainAnimation = PickMainAnimation();
+
             // The intro, when there is one and the art actually owns it. A named clip the art does
             // not have would otherwise leave the effect showing nothing at all.
             _playingIntro = !string.IsNullOrEmpty(introAnimation) && m_entityAnimator.HasAnimation(introAnimation);
@@ -169,8 +180,19 @@ namespace TakoBoyStudios.TopDown2D
                 return;
             }
 
-            if (!string.IsNullOrEmpty(animationName))
-                m_entityAnimator.Play(animationName);
+            if (!string.IsNullOrEmpty(_mainAnimation))
+                m_entityAnimator.Play(_mainAnimation);
+        }
+
+        // The clip this play of the effect settled on, so an intro hands over to the same variant
+        // it would have started on.
+        string _mainAnimation;
+
+        string PickMainAnimation()
+        {
+            if (animationVariants == null || animationVariants.Length == 0)
+                return animationName;
+            return animationVariants[Random.Range(0, animationVariants.Length)];
         }
 
         #endregion
@@ -197,8 +219,8 @@ namespace TakoBoyStudios.TopDown2D
             if (_playingIntro && m_entityAnimator != null && m_entityAnimator.IsDone)
             {
                 _playingIntro = false;
-                if (!string.IsNullOrEmpty(animationName))
-                    m_entityAnimator.Play(animationName);
+                if (!string.IsNullOrEmpty(_mainAnimation))
+                    m_entityAnimator.Play(_mainAnimation);
                 return true;
             }
 

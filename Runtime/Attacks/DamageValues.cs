@@ -32,9 +32,30 @@ namespace TakoBoyStudios.TopDown2D
         [Tooltip("Element, for the weakness chart. A hit the target is weak to does double.")]
         public Element damageType;
 
-        [Tooltip("How hard it shoves, in pixels of impulse. A bullet is about 60, an explosion 120 or more.")]
+        [Tooltip(
+            "The older push: an impulse added to the target's own movement, in pixels per second, that "
+                + "fades over about a second. A bullet is about 60, an explosion 120 or more. Ignored when "
+                + "a shove distance is set below."
+        )]
         [MinValue(0f)]
         public float knockback;
+
+        [Tooltip(
+            "The newer push (T-480): how far a shove carries the target, in pixels. A shove takes over "
+                + "the target's movement and freezes it for the shove time, fastest at the start and slowing "
+                + "to a stop, so it reads as a hit rather than a nudge the target walks through. 0 leaves "
+                + "this hit on the knockback above. 16 is a tile; the Guitar Riff shoves 32."
+        )]
+        [MinValue(0f)]
+        public float shoveDistance;
+
+        [Tooltip(
+            "How long the shove takes, in seconds, and so how long the target is frozen. The speed comes "
+                + "from the distance: 32 pixels over 0.25 seconds starts at 256 pixels per second. About 0.1 "
+                + "for a sharp melee shove, 0.25 for a blast."
+        )]
+        [MinValue(0f)]
+        public float shoveTime;
 
         [Tooltip("Screen shake on landing. 0.1 for an ordinary hit, 0.2 for something heavy.")]
         [Range(0f, 1f)]
