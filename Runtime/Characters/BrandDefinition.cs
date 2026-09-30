@@ -41,15 +41,25 @@ namespace TakoBoyStudios.TopDown2D
         [Tooltip(
             "How dark the screen gets, as the dim's opacity at each step from lightest to darkest. Stepped, "
                 + "not faded (PIXEL_RULES): each step is held, and the camera's palette clamp puts every "
-                + "level on real palette colours. Three steps up to 0.65 reads as night falling."
+                + "level on real palette colours. Three steps up to 0.5; past that most of the palette has no dark enough colour."
         )]
         [SerializeField]
-        float[] dimLevels = { 0.3f, 0.5f, 0.65f };
+        float[] dimLevels = { 0.2f, 0.35f, 0.5f };
 
         [BoxGroup("Screen")]
         [Tooltip("Seconds each dim step is held, going down and coming back. 0.06 is about four frames.")]
         [SerializeField, MinValue(0.01f)]
         float dimStepTime = 0.06f;
+
+        [BoxGroup("Screen")]
+        [Tooltip(
+            "The colour lookup the dimmed world is remapped through while the screen is dark. Grim and "
+                + "anything else drawn in front of the dim are never touched. PaletteLookupDimGrey drains the "
+                + "world to the palette's greys, a time-stopped look; PaletteLookupDimColour keeps each colour's "
+                + "hue as it darkens. Empty dims through the normal palette, which lands on greys and black."
+        )]
+        [SerializeField]
+        Texture3D dimLookup;
 
         [BoxGroup("Notes")]
         [Tooltip("Notes that come off the body on the beat while it loops. The Guitar Riff's notes.")]
@@ -109,6 +119,7 @@ namespace TakoBoyStudios.TopDown2D
         public float LoopDuration => loopDuration;
         public float[] DimLevels => dimLevels;
         public float DimStepTime => dimStepTime;
+        public Texture3D DimLookup => dimLookup;
         public DriftEffect NotePrefab => notePrefab;
         public float BeatInterval => beatInterval;
         public int NotesPerBeat => notesPerBeat;

@@ -2313,7 +2313,7 @@ namespace TakoBoyStudios.TopDown2D
             WorldFreeze.Begin();
             SetRunsWhileFrozen(true);
             DrawAbove(ScreenDim.AboveOrder + 5);
-            ScreenDim.Show(ability.DimLevels, ability.DimStepTime);
+            ScreenDim.Show(ability.DimLevels, ability.DimStepTime, ability.DimLookup);
         }
 
         /// <summary>Lets the world go and lightens the screen. Safe to call twice; the state's Exit always does.</summary>

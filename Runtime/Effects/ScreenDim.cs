@@ -11,6 +11,13 @@ namespace TakoBoyStudios.TopDown2D
     /// fade walks through darker palettes, and the camera's palette clamp snaps each level onto real
     /// palette colours. It runs on unscaled time, since the world is frozen while it plays.
     ///
+    /// **Only the world is dimmed, and a game can tell.** The dim's shader writes its own opacity into
+    /// the frame's alpha, and anything opaque drawn in front of it writes 1 back. A full-screen colour
+    /// pass can read that to remap the dimmed pixels alone (<see cref="Lookup"/>): Hell Wilds' palette
+    /// clamp does, because blending its palette toward black lands on greys and black (the owner,
+    /// 2026-09-29: "only grey and black show"), and remapping through a lookup built for the dim keeps
+    /// Grim, drawn in front, exactly as he is.
+    ///
     /// One dim for the whole screen, so a static owner of one object, built at setup
     /// (<see cref="Ensure"/>, from a player's Init) and only shown and hidden after that.
     /// </summary>
@@ -30,6 +37,13 @@ namespace TakoBoyStudios.TopDown2D
         int _level = -1;
         int _target = -1;
         float _stepTimer;
+        Texture3D _lookup;
+
+        /// <summary>
+        /// The colour lookup a game's full-screen colour pass should use for the dimmed pixels while the
+        /// dim is showing, or null for none. Given with <see cref="Show"/>; the dim only carries it.
+        /// </summary>
+        public static Texture3D Lookup => _instance != null ? _instance._lookup : null;
 
         /// <summary>
         /// Builds the dim if it does not exist yet. Setup only: a player's Init calls it, so the object,
@@ -54,11 +68,20 @@ namespace TakoBoyStudios.TopDown2D
 
             _instance._renderer = go.AddComponent<SpriteRenderer>();
 
-            // The plain unlit sprite shader every prefab in the game draws with, so the dim is not left
-            // on a lit default that a scene without 2D lights would draw black or not at all.
-            Shader shader = Shader.Find("Sprites/Default");
-            if (shader != null)
-                _instance._renderer.sharedMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            // The dim's own shader, which marks what it covers in the frame's alpha. Loaded from the
+            // package's Resources so a build always includes it; the plain sprite shader is the fallback,
+            // which still dims but marks nothing.
+            Material material = Resources.Load<Material>("TopDown2DScreenDim");
+            if (material != null)
+            {
+                _instance._renderer.sharedMaterial = material;
+            }
+            else
+            {
+                Shader shader = Shader.Find("Sprites/Default");
+                if (shader != null)
+                    _instance._renderer.sharedMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            }
 
             _instance._renderer.sprite = Sprite.Create(texture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 1f);
             _instance._renderer.sortingOrder = SortingOrder;
@@ -69,11 +92,14 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>
         /// Steps the screen down to its darkest level. <paramref name="levels"/> are the dim's opacities
         /// from lightest to darkest, and <paramref name="stepTime"/> is how long each is held on the way,
-        /// in seconds. The same levels walk back up on <see cref="Hide"/>.
+        /// in seconds. The same levels walk back up on <see cref="Hide"/>. <paramref name="lookup"/> is
+        /// what a game's colour pass should remap the dimmed pixels through while it shows (see
+        /// <see cref="Lookup"/>); null for none.
         /// </summary>
-        public static void Show(float[] levels, float stepTime)
+        public static void Show(float[] levels, float stepTime, Texture3D lookup = null)
         {
             Ensure();
+            _instance._lookup = lookup;
             if (levels != null && levels.Length > 0)
                 _instance._levels = levels;
             _instance._stepTime = Mathf.Max(0.01f, stepTime);
