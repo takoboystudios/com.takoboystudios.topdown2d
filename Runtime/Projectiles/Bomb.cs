@@ -132,7 +132,10 @@ namespace TakoBoyStudios.TopDown2D
 
         static void CreatePool(GameObject prefab, int size)
         {
-            if (prefab == null || PoolManager.Instance == null)
+            // Init runs on every throw (the thrower calls it before lobbing), and the pool is shared by
+            // every bomb of the kind, so asking again is the normal case. Without this check each throw
+            // logged "already exists", which built a string mid-fight (34 in one play session).
+            if (prefab == null || PoolManager.Instance == null || PoolManager.Instance.HasPool(prefab.name))
                 return;
 
             // Fixed size and pre-warmed, so a detonation never allocates.
