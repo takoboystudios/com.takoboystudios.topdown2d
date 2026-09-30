@@ -198,6 +198,24 @@ namespace TakoBoyStudios.TopDown2D
         // FSM States
         // -----------------------------
 
+        #region Knocking back
+
+        /// <summary>
+        /// Whether a melee can knock this shot back right now. False for an ordinary shot: which shots
+        /// can be knocked back is authored per projectile, the way the reference does it (its mud ball
+        /// can be hit back and its bomb deliberately cannot). A shot that can overrides both of these.
+        /// </summary>
+        public virtual bool CanBeDeflected => false;
+
+        /// <summary>
+        /// Knocked back by a melee along <paramref name="direction"/>, by <paramref name="deflectedBy"/>,
+        /// who becomes its instigator so a kill with it is theirs. What changes about the shot (its side,
+        /// its damage, its speed) is the shot's business. Nothing for an ordinary shot.
+        /// </summary>
+        public virtual void Deflect(Vector2 direction, Entity deflectedBy) { }
+
+        #endregion
+
         #region Flight animation
 
         bool _playingIntro;

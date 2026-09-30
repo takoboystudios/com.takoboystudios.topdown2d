@@ -12,9 +12,12 @@ namespace TakoBoyStudios.TopDown2D
         Jump = EntityState.Custom,
         Damaged,
 
-        /// <summary>Using the equipped Secondary: the bomb throw, the guitar strum. Rooted until the art finishes.</summary>
-        Secondary,
+        /// <summary>Using the Grip ability: the bomb throw, the guitar strum. Rooted until the art finishes.</summary>
+        Grip,
         Reviving,
+
+        /// <summary>Swinging the Knuckle ability: the guitar bash. Rooted until the art finishes.</summary>
+        Knuckle,
     }
 
     /// <summary>
@@ -190,15 +193,18 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, MinValue(0f)]
         float jumpBuffer = 0.10f;
 
-        [BoxGroup("Secondary")]
+        [BoxGroup("Loadout")]
         [Tooltip(
-            "The Secondaries this character can have in the grip slot: the Bomb, the Guitar Riff. The "
-                + "first is what they start a run with, until the Tavern's equip screen exists; the debug "
-                + "overlay cycles through the rest (G in the Debug Arena). Empty for a character with no "
-                + "Secondary, and the button does nothing."
+            "The Grip slot, the throw button: what this character can equip there (the Bomb, the Guitar "
+                + "Riff). The first is what they start a run with; G in the Debug Arena cycles it."
         )]
-        [SerializeField]
-        SecondaryDefinition[] secondaries;
+        [SerializeField, InlineProperty, LabelText("Grip")]
+        LoadoutSlot<GripDefinition> grip = new LoadoutSlot<GripDefinition>();
+
+        [BoxGroup("Loadout")]
+        [Tooltip("The Knuckle slot, the melee button: what this character can equip there (the Guitar Bash).")]
+        [SerializeField, InlineProperty, LabelText("Knuckle")]
+        LoadoutSlot<KnuckleDefinition> knuckle = new LoadoutSlot<KnuckleDefinition>();
 
         [BoxGroup("Hurt")]
         [Tooltip("Phase 1, the frozen reaction: seconds with motion locked, input ignored and the damaged clip playing. Cannot be hit. ~0.35s.")]
@@ -244,70 +250,31 @@ namespace TakoBoyStudios.TopDown2D
         InputAction _moveAction;
         InputAction _shootAction;
         InputAction _jumpAction;
-        InputAction _secondaryAction;
+        InputAction _gripAction;
+        InputAction _knuckleAction;
 
-        Vector2 _secondaryDirection = Vector2.down;
+        /// <summary>The Grip slot: the throw button. Per player, with its own uses.</summary>
+        public LoadoutSlot<GripDefinition> Grip => grip;
 
-        /// <summary>Whether the Secondary's clip has been seen at frame 0, so its frames may be counted. See StateSecondary.</summary>
-        bool _secondaryStarted;
-        bool _secondaryReleased;
+        /// <summary>The Knuckle slot: the melee button. Per player.</summary>
+        public LoadoutSlot<KnuckleDefinition> Knuckle => knuckle;
 
-        // Per player, never on the shared definition: two Grims carrying the Bomb each have their own
-        // count. Negative means the equipped Secondary never runs out.
-        SecondaryDefinition _equippedSecondary;
-        int _secondaryUses;
+        // The Grip in use: which way it was aimed, and whether its release frame has gone.
+        Vector2 _gripDirection = Vector2.down;
+        bool _gripReleased;
 
-        /// <summary>The Secondary in the grip slot, or null for a character with none.</summary>
-        public SecondaryDefinition EquippedSecondary => _equippedSecondary;
+        // The swing in progress: its aim, whether another is queued behind it, and everything it has
+        // already struck, so a target is hit once per swing however many active frames it stays in
+        // the arc. Lists sized at setup and cleared per swing, so a swing never allocates.
+        Vector2 _knuckleDirection = Vector2.down;
+        bool _knuckleQueued;
+        readonly System.Collections.Generic.List<Entity> _knuckleStruck = new System.Collections.Generic.List<Entity>(16);
+        readonly System.Collections.Generic.List<Collider2D> _knuckleOverlaps = new System.Collections.Generic.List<Collider2D>(32);
+        readonly System.Collections.Generic.List<Collider2D> _knuckleMagnet = new System.Collections.Generic.List<Collider2D>(32);
+        ContactFilter2D _knuckleFilter;
 
-        /// <summary>Uses left of the equipped Secondary. Negative when it never runs out. The HUD's grip slot counts down off this.</summary>
-        public int SecondaryUses => _secondaryUses;
-
-        /// <summary>How many Secondaries this character can equip. Walk them with <see cref="SecondaryAt"/>.</summary>
-        public int SecondaryCount => secondaries != null ? secondaries.Length : 0;
-
-        /// <summary>One of the Secondaries this character can equip, by index.</summary>
-        public SecondaryDefinition SecondaryAt(int index) => secondaries[index];
-
-        /// <summary>
-        /// Puts a Secondary in the grip slot with a fresh supply of uses. Equipping is a choice made
-        /// before a run (the Tavern), so a fresh supply is right; the debug overlay uses the same
-        /// call, which is also how a test refills. Its pools were built at Init, so this allocates
-        /// nothing. A Secondary this character does not list is refused, because nothing pooled it.
-        /// </summary>
-        public bool EquipSecondary(SecondaryDefinition secondary)
-        {
-            if (secondary != null && IndexOfSecondary(secondary) < 0)
-            {
-                Debug.LogWarning($"[Player] {name} cannot equip '{secondary.name}': it is not in this character's Secondaries list.", this);
-                return false;
-            }
-
-            _equippedSecondary = secondary;
-            _secondaryUses = secondary != null ? secondary.Uses : 0;
-            return true;
-        }
-
-        /// <summary>Equips the next Secondary in the list, wrapping round. For testing; the real choice is made in the Tavern.</summary>
-        public void CycleSecondary()
-        {
-            int count = SecondaryCount;
-            if (count == 0)
-                return;
-
-            int next = (IndexOfSecondary(_equippedSecondary) + 1) % count;
-            EquipSecondary(secondaries[next]);
-        }
-
-        int IndexOfSecondary(SecondaryDefinition secondary)
-        {
-            for (int i = 0; i < SecondaryCount; i++)
-            {
-                if (secondaries[i] == secondary)
-                    return i;
-            }
-            return -1;
-        }
+        static readonly Color KnuckleColor = new Color(1f, 0.45f, 0.1f, 1f);
+        static readonly Color KnuckleWindUpColor = new Color(1f, 0.8f, 0.3f, 1f);
 
         /// <summary>
         /// While set, no input reaches the player: no movement, aim, jump or bomb. Held from death
@@ -327,7 +294,7 @@ namespace TakoBoyStudios.TopDown2D
         /// pushing the UI map, which turns the gameplay map off entirely, and the whole point of an
         /// in-world choice is that the player keeps walking, aiming and dodging while they make it.
         ///
-        /// Optional, the same as the Secondary's action: an older input asset without the action leaves this null and
+        /// Optional, the same as the Grip and Knuckle actions: an older input asset without the action leaves this null and
         /// anything asking for it simply never fires.
         /// </summary>
         public InputAction InteractAction
@@ -451,8 +418,14 @@ namespace TakoBoyStudios.TopDown2D
             _skidPlayed = false;
         }
 
-        /// <summary>The clip the character put on for this use of the Secondary, so its frames are read and nothing else's.</summary>
-        string _secondaryClip;
+        /// <summary>
+        /// The clip the character put on for the slot ability in use (a throw, a swing), so its frames
+        /// are read and nothing else's. Null when the character had no art for it.
+        /// </summary>
+        string _slotClip;
+
+        /// <summary>Whether that clip has been seen playing, so its frames may be counted and its end trusted.</summary>
+        bool _slotClipSeen;
 
         protected Vector2 _shootDirection;
 
@@ -486,20 +459,32 @@ namespace TakoBoyStudios.TopDown2D
             _shootAction = _playerInput.actions["Shoot"];
             _jumpAction = _playerInput.actions["Jump"];
 
-            // The Secondary's button. Still called "Bomb" in the input asset, because the bomb was the
-            // only thing on it when it was bound. Optional so an older input asset without the action
-            // does not throw on load; the button simply does nothing until the binding exists.
-            _secondaryAction = _playerInput.actions.FindAction("Bomb");
+            // The loadout buttons: Grip throws, Knuckle swings. Optional, so an older input asset without
+            // the actions does not throw on load; the button simply does nothing until it is bound.
+            _gripAction = _playerInput.actions.FindAction("Grip");
+            _knuckleAction = _playerInput.actions.FindAction("Knuckle");
 
-            // Every Secondary this character could equip is pooled now, at setup, so swapping one in
-            // later (the Tavern, the debug key) never builds anything mid-run. Nothing else creates
-            // these: enemy projectiles get their pools from the wave runner that spawns them, but the
-            // player's own bomb and shockwave have no such owner, and without this Acquire returns
+            // Everything any slot option could spawn is pooled now, at setup, so swapping one in later
+            // (the Tavern, the debug key) never builds anything mid-run. Nothing else creates these:
+            // enemy projectiles get their pools from the wave runner that spawns them, but the player's
+            // own bomb, shockwave and hit sparks have no such owner, and without this Acquire returns
             // null and the button silently does nothing.
-            for (int i = 0; i < SecondaryCount; i++)
-                PoolSecondary(secondaries[i]);
+            for (int i = 0; i < grip.Count; i++)
+                PoolGrip(grip.At(i));
+            for (int i = 0; i < knuckle.Count; i++)
+                PoolKnuckle(knuckle.At(i));
 
-            EquipSecondary(SecondaryCount > 0 ? secondaries[0] : null);
+            grip.EquipFirst();
+            knuckle.EquipFirst();
+
+            // What a swing looks for: hitboxes (enemies, breakables) and hurtboxes (shots it might
+            // knock back). Both are triggers.
+            _knuckleFilter = new ContactFilter2D
+            {
+                useTriggers = true,
+                useLayerMask = true,
+                layerMask = LayerMask.GetMask("Hitbox", "Hurtbox"),
+            };
 
             if (m_basicGun)
                 m_basicGun.Init(this);
@@ -533,24 +518,34 @@ namespace TakoBoyStudios.TopDown2D
             base.AddStates();
             m_fsm.AddState(StateJump);
             m_fsm.AddState(StateDamaged);
-            m_fsm.AddState(StateSecondary);
+            m_fsm.AddState(StateGrip);
             m_fsm.AddState(StateReviving);
+            m_fsm.AddState(StateKnuckle);
         }
 
-        /// <summary>Pre-warms everything a Secondary spawns. Fixed size, so a use never allocates. Setup only.</summary>
-        static void PoolSecondary(SecondaryDefinition secondary)
+        /// <summary>Pre-warms everything a Grip ability spawns. Fixed size, so a use never allocates. Setup only.</summary>
+        static void PoolGrip(GripDefinition ability)
         {
-            if (secondary == null)
+            if (ability == null)
                 return;
 
-            CreateFixedPool(secondary.BombPrefab != null ? secondary.BombPrefab.gameObject : null, secondary.BombPoolSize);
-            CreateFixedPool(secondary.ShockwavePrefab != null ? secondary.ShockwavePrefab.gameObject : null, secondary.ShockwavePoolSize);
-            CreateFixedPool(secondary.NotePrefab != null ? secondary.NotePrefab.gameObject : null, secondary.NotePoolSize);
+            CreateFixedPool(ability.BombPrefab != null ? ability.BombPrefab.gameObject : null, ability.BombPoolSize);
+            CreateFixedPool(ability.ShockwavePrefab != null ? ability.ShockwavePrefab.gameObject : null, ability.ShockwavePoolSize);
+            CreateFixedPool(ability.NotePrefab != null ? ability.NotePrefab.gameObject : null, ability.NotePoolSize);
+        }
+
+        /// <summary>Pre-warms what a Knuckle ability spawns: its hit spark. Setup only.</summary>
+        static void PoolKnuckle(KnuckleDefinition ability)
+        {
+            if (ability == null)
+                return;
+
+            CreateFixedPool(ability.HitEffect != null ? ability.HitEffect.gameObject : null, ability.HitEffectPoolSize);
         }
 
         /// <summary>
         /// A fixed-size, pre-warmed pool. Skipped when one already exists under that name, which is
-        /// the normal case for a second player carrying the same Secondary: the pools are shared, and
+        /// the normal case for a second player carrying the same ability: the pools are shared, and
         /// asking twice would only log a warning.
         /// </summary>
         static void CreateFixedPool(GameObject prefab, int size)
@@ -914,7 +909,8 @@ namespace TakoBoyStudios.TopDown2D
             HandleMovementInput(deltaTime);
             HandleAttackInput();
             HandleJumpInput();
-            HandleSecondaryInput();
+            HandleGripInput();
+            HandleKnuckleInput();
         }
 
         #region Scripted walk
@@ -974,21 +970,20 @@ namespace TakoBoyStudios.TopDown2D
         #endregion
 
         /// <summary>
-        /// Uses the equipped Secondary on the press, aimed where the player is aiming.
+        /// Uses the Grip ability on the press, aimed where the player is aiming.
         ///
         /// Aim, not movement, on purpose: a bomb commits to where you are pointing, so a player can
-        /// back away from a fight and still put one into it. Falls back to the last facing when nothing
-        /// is held, so a standing player throws where they are looking rather than nowhere. A Secondary
-        /// that throws nothing (a shockwave alone) still faces this way, so its art points somewhere.
+        /// back away from a fight and still put one into it. Falls back to the way the body faces when
+        /// nothing is aimed, so a standing player throws where they are looking rather than nowhere.
         /// </summary>
-        void HandleSecondaryInput()
+        void HandleGripInput()
         {
-            if (InputLocked || _secondaryAction == null || _equippedSecondary == null || !_secondaryAction.WasPressedThisFrame())
+            if (InputLocked || _gripAction == null || !_gripAction.WasPressedThisFrame())
                 return;
 
-            // Out of uses: nothing, not even the wind-up, so an empty grip reads as empty rather than
-            // miming something that produces nothing.
-            if (_secondaryUses == 0)
+            // Out of uses, or nothing equipped: nothing, not even the wind-up, so an empty grip reads
+            // as empty rather than miming something that produces nothing.
+            if (!grip.Ready)
                 return;
 
             // The way the body is drawn facing, asked of the one place that answers it. This used to
@@ -1001,11 +996,20 @@ namespace TakoBoyStudios.TopDown2D
             //
             // Snapped to eight, like the gun. A throw that could go anywhere would be the only thing
             // in the game that does.
-            _secondaryDirection = Aim.Snap(BodyFacing);
+            _gripDirection = Aim.Snap(BodyFacing);
 
-            if (_secondaryDirection.sqrMagnitude < 0.0001f)
-                _secondaryDirection = Vector2.down;
-            m_fsm.ChangeState((int)PlayerState.Secondary);
+            if (_gripDirection.sqrMagnitude < 0.0001f)
+                _gripDirection = Vector2.down;
+            m_fsm.ChangeState((int)PlayerState.Grip);
+        }
+
+        /// <summary>Swings the Knuckle ability on the press. Aimed the same way the Grip is: BodyFacing.</summary>
+        void HandleKnuckleInput()
+        {
+            if (InputLocked || _knuckleAction == null || !_knuckleAction.WasPressedThisFrame() || !knuckle.Ready)
+                return;
+
+            m_fsm.ChangeState((int)PlayerState.Knuckle);
         }
 
         /// <summary>
@@ -1311,9 +1315,9 @@ namespace TakoBoyStudios.TopDown2D
 
             if (DebugDraw.Enabled)
             {
-                // The facing the body is drawn with, which is also the way a Secondary will go: white,
-                // or amber while the grace is holding it. Drawn from BodyFacing, the same answer the
-                // Secondary uses, so the line cannot show one thing while the throw does another.
+                // The facing the body is drawn with, which is also the way a throw or a swing will go:
+                // white, or amber while the grace is holding it. Drawn from BodyFacing, the same answer
+                // the Grip and Knuckle use, so the line cannot show one thing while they do another.
                 Color facingColour = _facingLiftAt >= 0f ? new Color(1f, 0.7f, 0.2f, 1f) : Color.white;
                 DebugDraw.Line(Position, (Vector2)Position + BodyFacing.normalized * 12f, facingColour);
             }
@@ -1605,7 +1609,8 @@ namespace TakoBoyStudios.TopDown2D
             // doing, which is exactly why it cannot be left to a function that reads the body.
             if (m_fsm.CurrentState == (int)PlayerState.Jump
                 || m_fsm.CurrentState == (int)PlayerState.Damaged
-                || m_fsm.CurrentState == (int)PlayerState.Secondary
+                || m_fsm.CurrentState == (int)PlayerState.Grip
+                || m_fsm.CurrentState == (int)PlayerState.Knuckle
                 || m_fsm.CurrentState == (int)PlayerState.Reviving
                 || IsDead)
             {
@@ -1634,35 +1639,69 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         protected virtual void UpdateCharacterAnimation() { }
 
+        // -----------------------------
+        // Loadout slots: the shared clip runner
+        // -----------------------------
+
         /// <summary>
-        /// Using the Secondary. Grim plants, winds up, and on the frame the art lands (the arm coming
-        /// through on the throw, the strum hitting the strings) everything the Secondary does happens
-        /// at once: the bomb leaves, the shockwave goes out, the notes burst.
+        /// Puts on a slot ability's animation, facing <paramref name="direction"/>, from its first frame,
+        /// and remembers which clip it was, so everything after asks about that clip and not about
+        /// "whatever is playing". Without that a state reads the clip it replaced: the walk was on
+        /// frame 0 and already finished, so the bomb left on the first frame and the throw ended before
+        /// it had drawn anything. False when the character has no art for it, and the ability does
+        /// nothing rather than timing itself off a looping idle that never finishes.
         ///
-        /// The release is read off the animation rather than run on a timer beside it, so the thing the
-        /// player sees and the thing the game does cannot drift apart. Same principle as the Gob Grunt's
-        /// charge under T-236, and the same trap avoided: the frame counter reports whichever clip is
-        /// playing, so it waits to see the Secondary's clip at frame 0 before counting its frames.
-        /// Without that, whatever was playing a moment ago decides when the bomb leaves.
+        /// Shared by every slot (Grip, Knuckle): the release frame and the active frames are read off
+        /// the art through <see cref="SlotClipFrame"/>, never run on a timer beside it, so what the
+        /// player sees and what the game does cannot drift apart (the Gob Grunt's charge, T-236).
         /// </summary>
-        void StateSecondary(Fsm.StateStep step, float deltaTime)
+        bool BeginSlotClip(SlotDefinition ability, Vector2 direction)
+        {
+            _slotClipSeen = false;
+            bool played = ability != null && PlaySlotVisual(ability, direction);
+            _slotClip = played && m_entityAnimator != null ? m_entityAnimator.CurrentAnimationName : null;
+            return _slotClip != null;
+        }
+
+        /// <summary>The slot clip's current frame, or -1 while something else is playing.</summary>
+        int SlotClipFrame()
+        {
+            if (m_entityAnimator == null || _slotClip == null || m_entityAnimator.CurrentAnimationName != _slotClip)
+                return -1;
+
+            _slotClipSeen = true;
+            return m_entityAnimator.CurrentFrame;
+        }
+
+        /// <summary>The slot clip has played out. Only true once it has actually been seen playing.</summary>
+        bool SlotClipDone => _slotClipSeen && m_entityAnimator != null && m_entityAnimator.IsDone;
+
+        /// <summary>
+        /// Play a slot ability's animation, facing <paramref name="direction"/>, from its first frame,
+        /// and say whether a clip went on. Empty here so each character supplies its own art; the timing
+        /// and what comes out are the same whoever uses it. False, the default, means this character
+        /// has no art for it, and the ability does nothing.
+        /// </summary>
+        protected virtual bool PlaySlotVisual(SlotDefinition ability, Vector2 direction) => false;
+
+        // -----------------------------
+        // Grip: the throw
+        // -----------------------------
+
+        /// <summary>
+        /// Using the Grip ability. Grim plants, winds up, and on the frame the art lands (the arm coming
+        /// through on the throw, the strum hitting the strings) everything it does happens at once: the
+        /// bomb leaves, the shockwave goes out, the notes burst.
+        /// </summary>
+        void StateGrip(Fsm.StateStep step, float deltaTime)
         {
             switch (step)
             {
                 case Fsm.StateStep.Enter:
                     ResetWalk();
                     SetMoveDirection(Vector2.zero);
-                    _secondaryStarted = false;
-                    _secondaryReleased = false;
-                    bool played = PlaySecondaryVisual(_equippedSecondary, _secondaryDirection);
-
-                    // Remember which clip the character actually put on, so everything below can ask
-                    // about that one rather than about "whatever is playing". Without this the state
-                    // reads the clip it replaced: the walk was on frame 0 and already finished, so the
-                    // bomb left on the first frame and the throw ended before it had drawn anything.
-                    // No art for this Secondary means no clip at all, and the state leaves at once
-                    // rather than timing itself off a looping idle that never finishes.
-                    _secondaryClip = played && m_entityAnimator != null ? m_entityAnimator.CurrentAnimationName : null;
+                    _gripReleased = false;
+                    BeginSlotClip(grip.Equipped, _gripDirection);
                     break;
 
                 case Fsm.StateStep.Update:
@@ -1671,61 +1710,59 @@ namespace TakoBoyStudios.TopDown2D
 
                     // The way it was decided to go, for as long as it plays.
                     if (DebugDraw.Enabled)
-                        DebugDraw.Line(Position, (Vector2)Position + _secondaryDirection * 20f, new Color(1f, 0.45f, 0.1f, 1f));
+                        DebugDraw.Line(Position, (Vector2)Position + _gripDirection * 20f, KnuckleColor);
 
-                    // No clip means nothing to read; leave rather than guess at timings.
-                    if (m_entityAnimator == null || string.IsNullOrEmpty(_secondaryClip) || _equippedSecondary == null)
+                    GripDefinition ability = grip.Equipped;
+                    if (ability == null || _slotClip == null)
                     {
                         m_fsm.ChangeState((int)EntityState.Idle);
                         break;
                     }
 
-                    // Only ever judge the Secondary's own clip.
-                    if (m_entityAnimator.CurrentAnimationName != _secondaryClip)
+                    int frame = SlotClipFrame();
+                    if (frame < 0)
                         break;
 
-                    _secondaryStarted = true;
-
-                    if (!_secondaryReleased && m_entityAnimator.CurrentFrame >= _equippedSecondary.ReleaseFrame)
+                    if (!_gripReleased && frame >= ability.ReleaseFrame)
                     {
-                        _secondaryReleased = true;
-                        ReleaseSecondary(_equippedSecondary);
+                        _gripReleased = true;
+                        ReleaseGrip(ability);
                     }
 
                     // Back to normal once the follow-through has played out. Everything has long since
                     // gone out by then, so the tail is purely the recovery the art draws.
-                    if (_secondaryStarted && m_entityAnimator.IsDone)
+                    if (SlotClipDone)
                         m_fsm.ChangeState((int)EntityState.Idle);
                     break;
             }
         }
 
         /// <summary>
-        /// Everything the Secondary does on its release frame. Each part is optional and skipped when
+        /// Everything the Grip ability does on its release frame. Each part is optional and skipped when
         /// the definition leaves it empty. A use is spent if anything actually went out, so a missing
-        /// pool never eats a count; the gate in HandleSecondaryInput keeps it from going below zero.
+        /// pool never eats a count; the gate in HandleGripInput keeps it from going below zero.
         /// </summary>
-        void ReleaseSecondary(SecondaryDefinition secondary)
+        void ReleaseGrip(GripDefinition ability)
         {
             bool spent = false;
-            spent |= ThrowSecondaryBomb(secondary);
-            spent |= SpawnSecondaryShockwave(secondary);
-            SpawnSecondaryNotes(secondary);
+            spent |= ThrowGripBomb(ability);
+            spent |= SpawnGripShockwave(ability);
+            SpawnGripNotes(ability);
 
-            if (spent && _secondaryUses > 0)
-                _secondaryUses--;
+            if (spent)
+                grip.Spend();
         }
 
         /// <summary>
-        /// Puts the Secondary's bomb in the air, aimed a fixed distance along the aim.
+        /// Puts the Grip's bomb in the air, aimed a fixed distance along the aim.
         ///
         /// A fixed distance rather than at the nearest enemy: a bomb that homed would remove the aiming
         /// from a weapon whose whole cost is that you have to place it, and the eight-direction aim is
         /// already the thing that makes positioning the skill.
         /// </summary>
-        bool ThrowSecondaryBomb(SecondaryDefinition secondary)
+        bool ThrowGripBomb(GripDefinition ability)
         {
-            Bomb prefab = secondary.BombPrefab;
+            Bomb prefab = ability.BombPrefab;
             if (prefab == null || PoolManager.Instance == null)
                 return false;
 
@@ -1748,7 +1785,7 @@ namespace TakoBoyStudios.TopDown2D
             // already stamp theirs; the player's throw was the one that did not.
             bomb.Instigator = this;
             bomb.Position = Position;
-            bomb.Lob((Vector2)Position + _secondaryDirection.normalized * secondary.ThrowDistance);
+            bomb.Lob((Vector2)Position + _gripDirection.normalized * ability.ThrowDistance);
             return true;
         }
 
@@ -1757,9 +1794,9 @@ namespace TakoBoyStudios.TopDown2D
         /// box is the hit and the shove, so everything about how far it reaches and how hard it pushes
         /// is on that prefab, where the ring is.
         /// </summary>
-        bool SpawnSecondaryShockwave(SecondaryDefinition secondary)
+        bool SpawnGripShockwave(GripDefinition ability)
         {
-            Effect prefab = secondary.ShockwavePrefab;
+            Effect prefab = ability.ShockwavePrefab;
             if (prefab == null || PoolManager.Instance == null)
                 return false;
 
@@ -1781,10 +1818,10 @@ namespace TakoBoyStudios.TopDown2D
         /// Notes thrown out in a ring from the body, evenly spaced with a little wobble and the whole
         /// ring turned at random, so no two strums look stamped. Cosmetic: never spends a use.
         /// </summary>
-        void SpawnSecondaryNotes(SecondaryDefinition secondary)
+        void SpawnGripNotes(GripDefinition ability)
         {
-            DriftEffect prefab = secondary.NotePrefab;
-            int count = secondary.NoteCount;
+            DriftEffect prefab = ability.NotePrefab;
+            int count = ability.NoteCount;
             if (prefab == null || count <= 0 || PoolManager.Instance == null)
                 return;
 
@@ -1796,7 +1833,7 @@ namespace TakoBoyStudios.TopDown2D
                 if (spawned == null)
                     return; // cosmetic, and a full pool means plenty of notes are already out
 
-                float degrees = turn + step * i + Random.Range(-secondary.NoteJitter, secondary.NoteJitter);
+                float degrees = turn + step * i + Random.Range(-ability.NoteJitter, ability.NoteJitter);
                 float radians = degrees * Mathf.Deg2Rad;
 
                 DriftEffect note = spawned.GetComponent<DriftEffect>();
@@ -1805,13 +1842,265 @@ namespace TakoBoyStudios.TopDown2D
             }
         }
 
+
+        // -----------------------------
+        // Knuckle: the melee
+        // -----------------------------
+
         /// <summary>
-        /// Play the Secondary's animation, facing <paramref name="direction"/>, and say whether a clip
-        /// went on. Empty here so each character supplies its own art; the timing and what comes out
-        /// are the same whoever uses it. False, the default, means this character has no art for it,
-        /// and the Secondary does nothing.
+        /// Swinging the Knuckle ability (T-454). Rooted for the swing. On the frames the art draws the
+        /// swing coming through, everything in the arc is hit once and shoved along the aim, and any
+        /// shot in it that is built to be knocked back is sent back. A press during the swing queues
+        /// the next one, which starts the frame this one ends: a mash is never lost and never cuts a
+        /// swing short, and nothing cancels a swing from inside (T-462).
+        ///
+        /// No invincibility. The jump has none either; the only window is the active frames (T-454).
         /// </summary>
-        protected virtual bool PlaySecondaryVisual(SecondaryDefinition secondary, Vector2 direction) => false;
+        void StateKnuckle(Fsm.StateStep step, float deltaTime)
+        {
+            switch (step)
+            {
+                case Fsm.StateStep.Enter:
+                    ResetWalk();
+                    SetMoveDirection(Vector2.zero);
+                    BeginKnuckleSwing(Aim.Snap(BodyFacing));
+                    break;
+
+                case Fsm.StateStep.Update:
+                    SetMoveDirection(Vector2.zero);
+
+                    KnuckleDefinition ability = knuckle.Equipped;
+                    if (ability == null || _slotClip == null)
+                    {
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                        break;
+                    }
+
+                    if (ability.QueueNextSwing
+                        && !_knuckleQueued
+                        && !InputLocked
+                        && _knuckleAction != null
+                        && _knuckleAction.WasPressedThisFrame())
+                    {
+                        _knuckleQueued = true;
+                    }
+
+                    int frame = SlotClipFrame();
+                    bool active = frame >= ability.ActiveStartFrame && frame <= ability.ActiveEndFrame;
+
+                    if (DebugDraw.Enabled)
+                        DrawKnuckleArc(ability, active);
+
+                    if (active)
+                        StrikeKnuckleArc(ability);
+
+                    if (!SlotClipDone)
+                        break;
+
+                    if (_knuckleQueued && knuckle.Ready)
+                        BeginKnuckleSwing(QueuedSwingDirection());
+                    else
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                    break;
+            }
+        }
+
+        /// <summary>Starts one swing along <paramref name="direction"/>, from the clip's first frame.</summary>
+        void BeginKnuckleSwing(Vector2 direction)
+        {
+            _knuckleDirection = direction.sqrMagnitude > 0.0001f ? direction : Vector2.down;
+            _knuckleQueued = false;
+            _knuckleStruck.Clear();
+            BeginSlotClip(knuckle.Equipped, _knuckleDirection);
+            knuckle.Spend();
+        }
+
+        /// <summary>
+        /// Where a queued swing goes. Idle is not running during a swing, so the aim and the facing it
+        /// keeps are as they were when this swing began; the sticks are read directly instead, so
+        /// turning while mashing turns the next swing. Neither held: the same way again.
+        /// </summary>
+        Vector2 QueuedSwingDirection()
+        {
+            Vector2 aim = _shootAction != null ? _shootAction.ReadValue<Vector2>() : Vector2.zero;
+            if (aim.sqrMagnitude > 0.1f)
+                return Aim.Snap(aim);
+
+            Vector2 move = _moveAction != null ? _moveAction.ReadValue<Vector2>() : Vector2.zero;
+            if (move.sqrMagnitude > 0.1f)
+                return Aim.Snap(move);
+
+            return _knuckleDirection;
+        }
+
+        /// <summary>
+        /// One active frame of the swing. Everything whose hitbox touches <see cref="KnuckleDefinition.Reach"/>
+        /// and whose centre is inside the arc is hit, once per swing: damage, then the shove along the
+        /// aim, through the same hit path every other attack uses, so kills, score, statuses and Perks
+        /// all see it. Shots that can be knocked back are sent back instead. Walks the overlaps by index
+        /// into lists sized at setup, so a swing allocates nothing.
+        /// </summary>
+        void StrikeKnuckleArc(KnuckleDefinition ability)
+        {
+            Vector2 origin = Position;
+            float halfArc = ability.ArcDegrees * 0.5f;
+
+            _knuckleOverlaps.Clear();
+            int count = Physics2D.OverlapCircle(origin, ability.Reach, _knuckleFilter, _knuckleOverlaps);
+            for (int i = 0; i < count; i++)
+            {
+                Collider2D overlap = _knuckleOverlaps[i];
+                if (overlap == null)
+                    continue;
+
+                Hurtbox2D shot = overlap.GetComponent<Hurtbox2D>();
+                if (shot != null)
+                {
+                    if (ability.KnocksBackShots)
+                        TryKnockBack(ability, shot, origin, halfArc);
+                    continue;
+                }
+
+                Hitbox2D target = overlap.GetComponent<Hitbox2D>();
+                if (target == null || target.Owner == null || target.Owner == this)
+                    continue;
+
+                // Our side (a partner in co-op), or nothing to hit: an enemy underground, or armoured.
+                if (target.Team == Team.Player || target.Phased || target.Invincible)
+                    continue;
+
+                if (_knuckleStruck.Contains(target.Owner))
+                    continue;
+
+                Vector2 at = target.transform.position;
+                if (!InKnuckleArc(origin, at, halfArc))
+                    continue;
+
+                _knuckleStruck.Add(target.Owner);
+
+                // Shoved along the aim, not out from Grim: everything one swing hits moves the same way,
+                // which is how the reference's melee pushes and what "you point, it goes there" means.
+                DamageInfo info = new DamageInfo(ability.Damage, this, target.Owner, _knuckleDirection)
+                {
+                    hitPoint = at,
+                    hitNormal = -_knuckleDirection,
+                };
+                target.Hit(new HitEvent(info, target.gameObject));
+                SpawnKnuckleHitEffect(ability, at);
+
+                if (DebugDraw.Enabled)
+                    DebugDraw.Line(origin, at, KnuckleColor);
+            }
+        }
+
+        /// <summary>
+        /// Sends back a shot the swing reached, if it is an enemy shot built to be knocked back
+        /// (<see cref="Projectile.CanBeDeflected"/>). It leaves along the aim, or at an enemy close to
+        /// that line, and the swinger becomes its instigator, so in co-op the kill is theirs (T-454).
+        /// </summary>
+        void TryKnockBack(KnuckleDefinition ability, Hurtbox2D shotBox, Vector2 origin, float halfArc)
+        {
+            if (shotBox.Team == Team.Player)
+                return; // ours, or already knocked back
+
+            Projectile shot = shotBox.Owner as Projectile;
+            if (shot == null || !shot.CanBeDeflected)
+                return;
+
+            Vector2 at = shotBox.transform.position;
+            if (!InKnuckleArc(origin, at, halfArc))
+                return;
+
+            Vector2 direction = KnockBackDirection(ability, origin);
+            shot.Deflect(direction, this);
+            SpawnKnuckleHitEffect(ability, at);
+
+            if (DebugDraw.Enabled)
+                DebugDraw.Line(at, at + direction * 48f, KnuckleColor);
+        }
+
+        /// <summary>
+        /// The aim, snapped to eight, unless an enemy stands within the magnet angle of that line and
+        /// inside the magnet range: then straight at the one nearest the line. The little pull T-454
+        /// asks for, so a returned shot that is nearly lined up does not just miss.
+        /// </summary>
+        Vector2 KnockBackDirection(KnuckleDefinition ability, Vector2 origin)
+        {
+            Vector2 best = _knuckleDirection;
+            float bestAngle = ability.MagnetDegrees;
+            if (bestAngle <= 0f || ability.MagnetRange <= 0f)
+                return best;
+
+            _knuckleMagnet.Clear();
+            int count = Physics2D.OverlapCircle(origin, ability.MagnetRange, _knuckleFilter, _knuckleMagnet);
+            for (int i = 0; i < count; i++)
+            {
+                Collider2D overlap = _knuckleMagnet[i];
+                Hitbox2D target = overlap != null ? overlap.GetComponent<Hitbox2D>() : null;
+                if (target == null || target.Phased || !(target.Owner is Enemy) || target.Owner.IsDead)
+                    continue;
+
+                Vector2 to = (Vector2)target.transform.position - origin;
+                if (to.sqrMagnitude < 1f)
+                    continue;
+
+                float angle = Vector2.Angle(_knuckleDirection, to);
+                if (angle <= bestAngle)
+                {
+                    bestAngle = angle;
+                    best = to.normalized;
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>Inside the swing's arc: within half the arc of the aim. Right on top of the body counts.</summary>
+        bool InKnuckleArc(Vector2 origin, Vector2 point, float halfArc)
+        {
+            Vector2 to = point - origin;
+            return to.sqrMagnitude < 1f || Vector2.Angle(_knuckleDirection, to) <= halfArc;
+        }
+
+        void SpawnKnuckleHitEffect(KnuckleDefinition ability, Vector2 at)
+        {
+            Effect prefab = ability.HitEffect;
+            if (prefab == null || PoolManager.Instance == null)
+                return;
+
+            // Cosmetic: a full pool means plenty of sparks are already out.
+            PoolManager.Instance.Acquire(prefab.name, at, Quaternion.identity);
+        }
+
+        /// <summary>
+        /// What the swing is doing, under Shift+D: its arc from the same reach, width and aim the strike
+        /// reads, pale while it winds up and orange on the frames it hits.
+        /// </summary>
+        void DrawKnuckleArc(KnuckleDefinition ability, bool active)
+        {
+            Color colour = active ? KnuckleColor : KnuckleWindUpColor;
+            Vector2 origin = Position;
+            float reach = ability.Reach;
+            float half = ability.ArcDegrees * 0.5f;
+            float aim = Mathf.Atan2(_knuckleDirection.y, _knuckleDirection.x) * Mathf.Rad2Deg;
+
+            const int Segments = 8;
+            Vector2 previous = origin + DirectionAt(aim - half) * reach;
+            DebugDraw.Line(origin, previous, colour, 1f);
+            for (int i = 1; i <= Segments; i++)
+            {
+                Vector2 next = origin + DirectionAt(aim - half + ability.ArcDegrees * i / Segments) * reach;
+                DebugDraw.Line(previous, next, colour, 1f);
+                previous = next;
+            }
+            DebugDraw.Line(origin, previous, colour, 1f);
+        }
+
+        static Vector2 DirectionAt(float degrees)
+        {
+            float radians = degrees * Mathf.Deg2Rad;
+            return new Vector2(Mathf.Cos(radians), Mathf.Sin(radians));
+        }
 
         /// <summary>
         /// Play the leap pose at takeoff, facing <paramref name="direction"/>. Empty here so each character
@@ -1821,7 +2110,7 @@ namespace TakoBoyStudios.TopDown2D
 
         /// <summary>
         /// The way the body is drawn facing right now: the one answer to "which way is he pointing",
-        /// for anything that acts along it (a Secondary) and for the debug facing line. The aim while
+        /// for anything that acts along it (a throw, a swing) and for the debug facing line. The aim while
         /// aiming, otherwise the facing the stick decided, release grace included. Never the walk,
         /// which bends and brakes on its own and so is not where the body is pointing (T-486).
         ///
@@ -1881,7 +2170,8 @@ namespace TakoBoyStudios.TopDown2D
             {
                 (int)PlayerState.Jump => "Jump",
                 (int)PlayerState.Damaged => "Damaged",
-                (int)PlayerState.Secondary => "Secondary",
+                (int)PlayerState.Grip => "Grip",
+                (int)PlayerState.Knuckle => "Knuckle",
                 (int)PlayerState.Reviving => "Reviving",
                 (int)EntityState.Idle => "Idle",
                 (int)EntityState.Dead => "Dead",
