@@ -226,7 +226,69 @@ namespace TakoBoyStudios.TopDown2D
             AddStates();
             OnShadowSizeChanged();
 
+            // What SetRunsWhileFrozen and DrawAbove switch, found once so neither searches at runtime.
+            _spriteAnimations = GetComponentsInChildren<SpriteAnimation>(true);
+            _authoredAnimationModes = new SpriteAnimationTimeMode[_spriteAnimations.Length];
+            for (int i = 0; i < _spriteAnimations.Length; i++)
+                _authoredAnimationModes[i] = _spriteAnimations[i].mode;
+            _sortingGroup = GetComponent<UnityEngine.Rendering.SortingGroup>();
+            _sorter = GetComponent<IsometricGroupSorter2D>();
+
             OnInitialized();
+        }
+
+        // ----------------------------
+        // The world freeze (T-200)
+        // ----------------------------
+
+        SpriteAnimation[] _spriteAnimations;
+        SpriteAnimationTimeMode[] _authoredAnimationModes;
+        UnityEngine.Rendering.SortingGroup _sortingGroup;
+        IsometricGroupSorter2D _sorter;
+        bool m_runsWhileFrozen;
+
+        /// <summary>Whether this keeps moving while <see cref="WorldFreeze"/> has stopped the world.</summary>
+        public bool RunsWhileFrozen => m_runsWhileFrozen;
+
+        /// <summary>
+        /// Lets this keep moving while the world is frozen: its tick is fed unscaled time and its sprite
+        /// animations play unscaled. For the one who froze the world and what they spawn during it.
+        /// Off again puts the animations back the way the prefab had them. A pooled body always comes
+        /// back off.
+        /// </summary>
+        public void SetRunsWhileFrozen(bool value)
+        {
+            m_runsWhileFrozen = value;
+            if (_spriteAnimations == null)
+                return;
+
+            for (int i = 0; i < _spriteAnimations.Length; i++)
+            {
+                if (_spriteAnimations[i] == null)
+                    continue;
+                _spriteAnimations[i].mode = value ? SpriteAnimationTimeMode.TIMESCALEINDEPENDENT : _authoredAnimationModes[i];
+            }
+        }
+
+        /// <summary>
+        /// Draws this at a fixed sorting order instead of by its y, for as long as it lasts: above the
+        /// dimmed screen during the Brand, where the world's own order no longer applies. Its y-sorter
+        /// is paused so the two do not fight over the same field; <see cref="ResumeSorting"/> hands the
+        /// order back to it, and a pooled body always comes back sorting by y.
+        /// </summary>
+        public void DrawAbove(int sortingOrder)
+        {
+            if (_sorter != null)
+                _sorter.enabled = false;
+            if (_sortingGroup != null)
+                _sortingGroup.sortingOrder = sortingOrder;
+        }
+
+        /// <summary>Back to sorting by y after <see cref="DrawAbove"/>.</summary>
+        public void ResumeSorting()
+        {
+            if (_sorter != null && !_sorter.enabled)
+                _sorter.enabled = true;
         }
 
         /// <summary>
@@ -250,7 +312,13 @@ namespace TakoBoyStudios.TopDown2D
             if (m_fsm == null)
                 return;
 
-            float dt = Time.deltaTime;
+            // Frozen and not exempt: no tick at all, not a tick of zero. A tick of zero still reads
+            // input and changes state, so a second player could queue a shot or a jump in the middle
+            // of a freeze that is meant to hold them still (T-200).
+            if (WorldFreeze.IsFrozen && !m_runsWhileFrozen)
+                return;
+
+            float dt = m_runsWhileFrozen ? Time.unscaledDeltaTime : Time.deltaTime;
             Tick(dt);
         }
 
@@ -916,6 +984,11 @@ namespace TakoBoyStudios.TopDown2D
             // that window, and the wave runner asks every frame, sees a corpse and writes the enemy
             // off before it has drawn breath.
             m_fsm?.ForceState((int)EntityState.Idle);
+
+            // Whatever a freeze or a Brand did to the last life does not carry into this one.
+            if (m_runsWhileFrozen)
+                SetRunsWhileFrozen(false);
+            ResumeSorting();
         }
 
         public virtual void OnReleased() { }

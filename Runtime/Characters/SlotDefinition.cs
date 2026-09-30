@@ -61,5 +61,14 @@ namespace TakoBoyStudios.TopDown2D
 
         /// <summary>Uses a player starts a run with. Negative means it never runs out.</summary>
         public int Uses => uses;
+
+        /// <summary>
+        /// How many clip sets this ability plays. One for a throw or a swing; the Brand has an intro, a
+        /// loop and a recovery. The character builds its facing tables from every one of them at setup.
+        /// </summary>
+        public virtual int ClipSetCount => 1;
+
+        /// <summary>One of this ability's clip sets, without the facing. The first is <see cref="Animation"/>.</summary>
+        public virtual string ClipSet(int index) => animation;
     }
 }

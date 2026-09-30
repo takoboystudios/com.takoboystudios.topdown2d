@@ -18,6 +18,9 @@ namespace TakoBoyStudios.TopDown2D
 
         /// <summary>Swinging the Knuckle ability: the guitar bash. Rooted until the art finishes.</summary>
         Knuckle,
+
+        /// <summary>The Brand: the special. The world is frozen for most of it. See StateBrand.</summary>
+        Brand,
     }
 
     /// <summary>
@@ -206,6 +209,11 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, InlineProperty, LabelText("Knuckle")]
         LoadoutSlot<KnuckleDefinition> knuckle = new LoadoutSlot<KnuckleDefinition>();
 
+        [BoxGroup("Loadout")]
+        [Tooltip("The Brand slot, the special: what this character can equip there (the Mega Riff).")]
+        [SerializeField, InlineProperty, LabelText("Brand")]
+        LoadoutSlot<BrandDefinition> brand = new LoadoutSlot<BrandDefinition>();
+
         [BoxGroup("Hurt")]
         [Tooltip("Phase 1, the frozen reaction: seconds with motion locked, input ignored and the damaged clip playing. Cannot be hit. ~0.35s.")]
         [SerializeField, MinValue(0.05f)]
@@ -252,12 +260,34 @@ namespace TakoBoyStudios.TopDown2D
         InputAction _jumpAction;
         InputAction _gripAction;
         InputAction _knuckleAction;
+        InputAction _brandAction;
 
         /// <summary>The Grip slot: the throw button. Per player, with its own uses.</summary>
         public LoadoutSlot<GripDefinition> Grip => grip;
 
         /// <summary>The Knuckle slot: the melee button. Per player.</summary>
         public LoadoutSlot<KnuckleDefinition> Knuckle => knuckle;
+
+        /// <summary>The Brand slot: the special. Per player.</summary>
+        public LoadoutSlot<BrandDefinition> Brand => brand;
+
+        // The Brand in progress (T-200): which part of it is playing, the clocks inside the loop, and
+        // whether this player is the one holding the world frozen. Lists sized at setup for the one
+        // sweep at the end, so a Brand allocates nothing.
+        enum BrandPhase
+        {
+            Intro,
+            Loop,
+            Recovery,
+        }
+
+        BrandPhase _brandPhase;
+        float _brandTimer;
+        float _beatTimer;
+        float _rainTimer;
+        bool _brandFreezing;
+        readonly System.Collections.Generic.List<Collider2D> _brandOverlaps = new System.Collections.Generic.List<Collider2D>(128);
+        readonly System.Collections.Generic.List<Entity> _brandStruck = new System.Collections.Generic.List<Entity>(64);
 
         // The Grip in use: which way it was aimed, and whether its release frame has gone.
         Vector2 _gripDirection = Vector2.down;
@@ -271,7 +301,7 @@ namespace TakoBoyStudios.TopDown2D
         readonly System.Collections.Generic.List<Entity> _knuckleStruck = new System.Collections.Generic.List<Entity>(16);
         readonly System.Collections.Generic.List<Collider2D> _knuckleOverlaps = new System.Collections.Generic.List<Collider2D>(32);
         readonly System.Collections.Generic.List<Collider2D> _knuckleMagnet = new System.Collections.Generic.List<Collider2D>(32);
-        ContactFilter2D _knuckleFilter;
+        ContactFilter2D _strikeFilter;
 
         static readonly Color KnuckleColor = new Color(1f, 0.45f, 0.1f, 1f);
         static readonly Color KnuckleWindUpColor = new Color(1f, 0.8f, 0.3f, 1f);
@@ -395,7 +425,15 @@ namespace TakoBoyStudios.TopDown2D
         /// through Unity's null comparison, but leaving explicitly is what raises
         /// <see cref="Players.Left"/> so a HUD block can hide itself rather than sitting on a corpse.
         /// </summary>
-        void OnDestroy() => Players.Leave(this);
+        void OnDestroy()
+        {
+            // A Brand cut off by the body going (a scene change mid-special) must not leave the world
+            // stopped for whoever comes next.
+            EndBrandFreeze();
+            Players.Leave(this);
+        }
+
+        void OnDisable() => EndBrandFreeze();
 
         public virtual void Face(Vector2 direction)
         {
@@ -463,6 +501,7 @@ namespace TakoBoyStudios.TopDown2D
             // the actions does not throw on load; the button simply does nothing until it is bound.
             _gripAction = _playerInput.actions.FindAction("Grip");
             _knuckleAction = _playerInput.actions.FindAction("Knuckle");
+            _brandAction = _playerInput.actions.FindAction("Brand");
 
             // Everything any slot option could spawn is pooled now, at setup, so swapping one in later
             // (the Tavern, the debug key) never builds anything mid-run. Nothing else creates these:
@@ -473,13 +512,20 @@ namespace TakoBoyStudios.TopDown2D
                 PoolGrip(grip.At(i));
             for (int i = 0; i < knuckle.Count; i++)
                 PoolKnuckle(knuckle.At(i));
+            for (int i = 0; i < brand.Count; i++)
+                PoolBrand(brand.At(i));
 
             grip.EquipFirst();
             knuckle.EquipFirst();
+            brand.EquipFirst();
 
-            // What a swing looks for: hitboxes (enemies, breakables) and hurtboxes (shots it might
-            // knock back). Both are triggers.
-            _knuckleFilter = new ContactFilter2D
+            // The Brand's dimmed screen, built now rather than the first time anyone uses one.
+            if (brand.Count > 0)
+                ScreenDim.Ensure();
+
+            // What a swing or the Brand's sweep looks for: hitboxes (enemies, breakables) and hurtboxes
+            // (shots to knock back or pop). Both are triggers.
+            _strikeFilter = new ContactFilter2D
             {
                 useTriggers = true,
                 useLayerMask = true,
@@ -521,6 +567,7 @@ namespace TakoBoyStudios.TopDown2D
             m_fsm.AddState(StateGrip);
             m_fsm.AddState(StateReviving);
             m_fsm.AddState(StateKnuckle);
+            m_fsm.AddState(StateBrand);
         }
 
         /// <summary>Pre-warms everything a Grip ability spawns. Fixed size, so a use never allocates. Setup only.</summary>
@@ -532,6 +579,21 @@ namespace TakoBoyStudios.TopDown2D
             CreateFixedPool(ability.BombPrefab != null ? ability.BombPrefab.gameObject : null, ability.BombPoolSize);
             CreateFixedPool(ability.ShockwavePrefab != null ? ability.ShockwavePrefab.gameObject : null, ability.ShockwavePoolSize);
             CreateFixedPool(ability.NotePrefab != null ? ability.NotePrefab.gameObject : null, ability.NotePoolSize);
+        }
+
+        /// <summary>Pre-warms what a Brand spawns: its notes, its rain and the rain's blasts. Setup only.</summary>
+        static void PoolBrand(BrandDefinition ability)
+        {
+            if (ability == null)
+                return;
+
+            CreateFixedPool(ability.NotePrefab != null ? ability.NotePrefab.gameObject : null, ability.NotePoolSize);
+            CreateFixedPool(ability.RainPrefab != null ? ability.RainPrefab.gameObject : null, ability.RainPoolSize);
+
+            // The rain's blasts too, here at setup: the rain would otherwise pool them itself the first
+            // time one lands, which is in the middle of the special.
+            Effect impact = ability.RainPrefab != null ? ability.RainPrefab.ImpactEffect : null;
+            CreateFixedPool(impact != null ? impact.gameObject : null, ability.RainPrefab != null ? ability.RainPrefab.ImpactPoolSize : 1);
         }
 
         /// <summary>Pre-warms what a Knuckle ability spawns: its hit spark. Setup only.</summary>
@@ -578,6 +640,11 @@ namespace TakoBoyStudios.TopDown2D
         {
             if (!gameObject.activeSelf)
                 gameObject.SetActive(true);
+
+            // A room change in the middle of a Brand lets the world go and puts the body back in the
+            // world's draw order.
+            EndBrandFreeze();
+            ResumeSorting();
 
             _shootDirection = Vector2.zero;
             _heldAim = Vector2.zero;
@@ -911,6 +978,7 @@ namespace TakoBoyStudios.TopDown2D
             HandleJumpInput();
             HandleGripInput();
             HandleKnuckleInput();
+            HandleBrandInput();
         }
 
         #region Scripted walk
@@ -1611,6 +1679,7 @@ namespace TakoBoyStudios.TopDown2D
                 || m_fsm.CurrentState == (int)PlayerState.Damaged
                 || m_fsm.CurrentState == (int)PlayerState.Grip
                 || m_fsm.CurrentState == (int)PlayerState.Knuckle
+                || m_fsm.CurrentState == (int)PlayerState.Brand
                 || m_fsm.CurrentState == (int)PlayerState.Reviving
                 || IsDead)
             {
@@ -1655,10 +1724,17 @@ namespace TakoBoyStudios.TopDown2D
         /// the art through <see cref="SlotClipFrame"/>, never run on a timer beside it, so what the
         /// player sees and what the game does cannot drift apart (the Gob Grunt's charge, T-236).
         /// </summary>
-        bool BeginSlotClip(SlotDefinition ability, Vector2 direction)
+        bool BeginSlotClip(SlotDefinition ability, Vector2 direction) =>
+            BeginClipSet(ability != null ? ability.Animation : null, direction);
+
+        /// <summary>
+        /// <see cref="BeginSlotClip"/> for a named clip set rather than an ability's first one: the
+        /// Brand plays three, its intro, its loop and its recovery, through this.
+        /// </summary>
+        bool BeginClipSet(string set, Vector2 direction)
         {
             _slotClipSeen = false;
-            bool played = ability != null && PlaySlotVisual(ability, direction);
+            bool played = !string.IsNullOrEmpty(set) && PlayClipSet(set, direction);
             _slotClip = played && m_entityAnimator != null ? m_entityAnimator.CurrentAnimationName : null;
             return _slotClip != null;
         }
@@ -1677,12 +1753,12 @@ namespace TakoBoyStudios.TopDown2D
         bool SlotClipDone => _slotClipSeen && m_entityAnimator != null && m_entityAnimator.IsDone;
 
         /// <summary>
-        /// Play a slot ability's animation, facing <paramref name="direction"/>, from its first frame,
-        /// and say whether a clip went on. Empty here so each character supplies its own art; the timing
-        /// and what comes out are the same whoever uses it. False, the default, means this character
-        /// has no art for it, and the ability does nothing.
+        /// Play a slot ability's clip set ("guitar-strum", "guitar-ultimate-loop"), facing
+        /// <paramref name="direction"/>, from its first frame, and say whether a clip went on. Empty here
+        /// so each character supplies its own art; the timing and what comes out are the same whoever
+        /// uses it. False, the default, means this character has no art for it.
         /// </summary>
-        protected virtual bool PlaySlotVisual(SlotDefinition ability, Vector2 direction) => false;
+        protected virtual bool PlayClipSet(string set, Vector2 direction) => false;
 
         // -----------------------------
         // Grip: the throw
@@ -1946,7 +2022,7 @@ namespace TakoBoyStudios.TopDown2D
             float halfArc = ability.ArcDegrees * 0.5f;
 
             _knuckleOverlaps.Clear();
-            int count = Physics2D.OverlapCircle(origin, ability.Reach, _knuckleFilter, _knuckleOverlaps);
+            int count = Physics2D.OverlapCircle(origin, ability.Reach, _strikeFilter, _knuckleOverlaps);
             for (int i = 0; i < count; i++)
             {
                 Collider2D overlap = _knuckleOverlaps[i];
@@ -2032,7 +2108,7 @@ namespace TakoBoyStudios.TopDown2D
                 return best;
 
             _knuckleMagnet.Clear();
-            int count = Physics2D.OverlapCircle(origin, ability.MagnetRange, _knuckleFilter, _knuckleMagnet);
+            int count = Physics2D.OverlapCircle(origin, ability.MagnetRange, _strikeFilter, _knuckleMagnet);
             for (int i = 0; i < count; i++)
             {
                 Collider2D overlap = _knuckleMagnet[i];
@@ -2100,6 +2176,257 @@ namespace TakoBoyStudios.TopDown2D
         {
             float radians = degrees * Mathf.Deg2Rad;
             return new Vector2(Mathf.Cos(radians), Mathf.Sin(radians));
+        }
+
+        // -----------------------------
+        // Brand: the special
+        // -----------------------------
+
+        /// <summary>Starts the Brand on the press, if one is equipped with a use left.</summary>
+        void HandleBrandInput()
+        {
+            if (InputLocked || _brandAction == null || !_brandAction.WasPressedThisFrame() || !brand.Ready)
+                return;
+
+            m_fsm.ChangeState((int)PlayerState.Brand);
+        }
+
+        /// <summary>
+        /// The Brand (T-200), the owner's shape of it: the screen darkens with Grim alone in the
+        /// foreground and **everything else frozen, the other player included**. He plays the intro
+        /// once, then the loop for the Brand's duration, with notes coming off him on the beat and note
+        /// bombs raining onto the screen from the upper right. Then the world comes back, the screen
+        /// lightens, he plays the recovery, and everything on screen takes the Brand's damage at once.
+        ///
+        /// This runs on unscaled time: <see cref="WorldFreeze"/> stops time itself and this player opts
+        /// out of it for the frozen part (<see cref="Entity.SetRunsWhileFrozen"/>). Whatever ends the
+        /// state early (a hit in the recovery, a room change) lets the world go on the way out.
+        /// </summary>
+        void StateBrand(Fsm.StateStep step, float deltaTime)
+        {
+            switch (step)
+            {
+                case Fsm.StateStep.Enter:
+                {
+                    ResetWalk();
+                    SetMoveDirection(Vector2.zero);
+                    _shootDirection = Vector2.zero;
+
+                    BrandDefinition ability = brand.Equipped;
+                    if (ability == null)
+                        break;
+
+                    brand.Spend();
+                    BeginBrandFreeze(ability);
+
+                    _brandPhase = BrandPhase.Intro;
+                    if (!BeginClipSet(ability.Animation, Vector2.down))
+                        StartBrandLoop(ability); // no intro art: straight into the loop
+                    break;
+                }
+
+                case Fsm.StateStep.Update:
+                {
+                    SetMoveDirection(Vector2.zero);
+
+                    BrandDefinition ability = brand.Equipped;
+                    if (ability == null)
+                    {
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                        break;
+                    }
+
+                    SlotClipFrame();
+
+                    if (_brandPhase == BrandPhase.Intro)
+                    {
+                        if (_slotClip == null || SlotClipDone)
+                            StartBrandLoop(ability);
+                    }
+                    else if (_brandPhase == BrandPhase.Loop)
+                    {
+                        TickBrandLoop(ability, deltaTime);
+                    }
+                    else if (_slotClip == null || SlotClipDone)
+                    {
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                    }
+                    break;
+                }
+
+                case Fsm.StateStep.Exit:
+                    EndBrandFreeze();
+                    ResumeSorting();
+                    break;
+            }
+        }
+
+        void StartBrandLoop(BrandDefinition ability)
+        {
+            _brandPhase = BrandPhase.Loop;
+            _brandTimer = 0f;
+            _beatTimer = 0f;
+            _rainTimer = 0f;
+            BeginClipSet(ability.LoopAnimation, Vector2.down);
+        }
+
+        /// <summary>One frame of the loop: the strum repeating, the notes on the beat, the rain, the clock.</summary>
+        void TickBrandLoop(BrandDefinition ability, float deltaTime)
+        {
+            // The loop clip plays once per pass; it is started again each time it ends, so it loops
+            // whatever the clip's own loop flag says.
+            if (_slotClip != null && SlotClipDone)
+                BeginClipSet(ability.LoopAnimation, Vector2.down);
+
+            _beatTimer -= deltaTime;
+            if (_beatTimer <= 0f)
+            {
+                _beatTimer += ability.BeatInterval;
+                SpawnBrandNotes(ability);
+            }
+
+            _rainTimer -= deltaTime;
+            if (_rainTimer <= 0f)
+            {
+                _rainTimer += ability.RainInterval;
+                DropBrandRain(ability);
+            }
+
+            _brandTimer += deltaTime;
+            if (_brandTimer < ability.LoopDuration)
+                return;
+
+            // The world comes back, the screen lightens, and everything on it is hit. Grim stays drawn
+            // in front until the state ends, so he is never under the dim while it steps away.
+            EndBrandFreeze();
+            StrikeEverythingOnScreen(ability);
+            _brandPhase = BrandPhase.Recovery;
+            BeginClipSet(ability.RecoveryAnimation, Vector2.down);
+        }
+
+        void BeginBrandFreeze(BrandDefinition ability)
+        {
+            if (_brandFreezing)
+                return;
+
+            _brandFreezing = true;
+            WorldFreeze.Begin();
+            SetRunsWhileFrozen(true);
+            DrawAbove(ScreenDim.AboveOrder + 5);
+            ScreenDim.Show(ability.DimLevels, ability.DimStepTime);
+        }
+
+        /// <summary>Lets the world go and lightens the screen. Safe to call twice; the state's Exit always does.</summary>
+        void EndBrandFreeze()
+        {
+            if (!_brandFreezing)
+                return;
+
+            _brandFreezing = false;
+            WorldFreeze.End();
+            SetRunsWhileFrozen(false);
+            ScreenDim.Hide();
+        }
+
+        /// <summary>A burst of notes off the body, each on its own random heading, in front of the dim.</summary>
+        void SpawnBrandNotes(BrandDefinition ability)
+        {
+            DriftEffect prefab = ability.NotePrefab;
+            if (prefab == null || PoolManager.Instance == null)
+                return;
+
+            for (int i = 0; i < ability.NotesPerBeat; i++)
+            {
+                GameObject spawned = PoolManager.Instance.Acquire(prefab.name, Position, Quaternion.identity);
+                DriftEffect note = spawned != null ? spawned.GetComponent<DriftEffect>() : null;
+                if (note == null)
+                    return; // cosmetic, and a full pool means plenty are out
+
+                note.SetRunsWhileFrozen(true);
+                note.DrawAbove(ScreenDim.AboveOrder + 1);
+                note.Launch(DirectionAt(Random.Range(0f, 360f)));
+            }
+        }
+
+        /// <summary>
+        /// One note bomb out of the sky onto a random spot on screen, from the upper right. Off the top of
+        /// the screen when it starts: its height clears the top edge, and its ground start is that far to
+        /// the right, so it comes down at 45 degrees.
+        /// </summary>
+        void DropBrandRain(BrandDefinition ability)
+        {
+            FallEffect prefab = ability.RainPrefab;
+            if (prefab == null || PoolManager.Instance == null)
+                return;
+
+            Rect view = ScreenView.Current;
+            if (view.width <= 0f)
+                return;
+
+            float margin = ability.RainMargin;
+            Vector2 target = new Vector2(
+                Random.Range(view.xMin + margin, view.xMax - margin),
+                // The bottom keeps a second margin clear for the HUD band.
+                Random.Range(view.yMin + margin * 2f, view.yMax - margin)
+            );
+            float height = view.yMax - target.y + 32f;
+
+            GameObject spawned = PoolManager.Instance.Acquire(prefab.name, target, Quaternion.identity);
+            FallEffect drop = spawned != null ? spawned.GetComponent<FallEffect>() : null;
+            if (drop == null)
+                return;
+
+            drop.SetRunsWhileFrozen(true);
+            drop.DrawAbove(ScreenDim.AboveOrder + 2);
+            drop.Drop(target, height, new Vector2(height, 0f));
+        }
+
+        /// <summary>
+        /// The Brand's hit: everything with a hitbox on screen takes the damage once, through the same
+        /// hit path as every other attack, so kills, score and statuses all see it. Enemy shots on screen
+        /// are popped. Walks the overlaps by index into lists sized at setup.
+        /// </summary>
+        void StrikeEverythingOnScreen(BrandDefinition ability)
+        {
+            Rect view = ScreenView.Current;
+            if (view.width <= 0f)
+                return;
+
+            _brandOverlaps.Clear();
+            _brandStruck.Clear();
+            int count = Physics2D.OverlapBox(view.center, view.size, 0f, _strikeFilter, _brandOverlaps);
+            for (int i = 0; i < count; i++)
+            {
+                Collider2D overlap = _brandOverlaps[i];
+                if (overlap == null)
+                    continue;
+
+                Hurtbox2D shotBox = overlap.GetComponent<Hurtbox2D>();
+                if (shotBox != null)
+                {
+                    if (ability.ClearsEnemyShots && shotBox.Team != Team.Player && shotBox.Owner is Projectile shot && !shot.IsDead)
+                        shot.Die();
+                    continue;
+                }
+
+                Hitbox2D target = overlap.GetComponent<Hitbox2D>();
+                if (target == null || target.Owner == null || target.Owner == this)
+                    continue;
+                if (target.Team == Team.Player || target.Phased || _brandStruck.Contains(target.Owner))
+                    continue;
+
+                _brandStruck.Add(target.Owner);
+
+                Vector2 at = target.transform.position;
+                Vector2 away = at - (Vector2)Position;
+                Vector2 direction = away.sqrMagnitude > 0.01f ? away.normalized : Vector2.down;
+                DamageInfo info = new DamageInfo(ability.Damage, this, target.Owner, direction)
+                {
+                    hitPoint = at,
+                    hitNormal = -direction,
+                };
+                target.Hit(new HitEvent(info, target.gameObject));
+            }
         }
 
         /// <summary>
@@ -2172,6 +2499,7 @@ namespace TakoBoyStudios.TopDown2D
                 (int)PlayerState.Damaged => "Damaged",
                 (int)PlayerState.Grip => "Grip",
                 (int)PlayerState.Knuckle => "Knuckle",
+                (int)PlayerState.Brand => "Brand",
                 (int)PlayerState.Reviving => "Reviving",
                 (int)EntityState.Idle => "Idle",
                 (int)EntityState.Dead => "Dead",

@@ -74,6 +74,15 @@ namespace TakoBoyStudios.TopDown2D
 
         private Vector3Int _lastCell;
 
+        // Re-enabled (a pooled body coming back, or DrawAbove handing the order back): something else
+        // may have written the order meanwhile, so the next update writes it whatever it last was.
+        void OnEnable()
+        {
+            _lastSortOrder = int.MinValue;
+            if (_sortingGroup != null && Application.isPlaying)
+                UpdateSortingOrder();
+        }
+
         void LateUpdate()
         {
             // World mode: re-sort from y every frame while playing. This used to return here, so a

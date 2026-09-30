@@ -130,4 +130,36 @@ namespace TakoBoyStudios.TopDown2D
             HeavyHitBreaks = null;
         }
     }
+
+    /// <summary>
+    /// What the players can see, in world units: the gameplay frame. The entity layer does not know
+    /// what a camera is (T-409), so a screen-wide effect (the Brand's hit on everything on screen, the
+    /// dimmed screen behind it) asks here and the game wires <see cref="Visible"/> to its own camera,
+    /// which in Hell Wilds is <c>CameraController</c> with the 256 x 144 frame. Unwired, it falls back to
+    /// the main camera's orthographic view.
+    /// </summary>
+    public static class ScreenView
+    {
+        /// <summary>The visible gameplay rect. Left null, the main camera's view is used.</summary>
+        public static Func<Rect> Visible;
+
+        /// <summary>The visible rect, from the hook or the main camera. Empty when there is neither.</summary>
+        public static Rect Current
+        {
+            get
+            {
+                if (Visible != null)
+                    return Visible();
+
+                Camera camera = Camera.main;
+                if (camera == null || !camera.orthographic)
+                    return default;
+
+                float height = camera.orthographicSize * 2f;
+                float width = height * camera.aspect;
+                Vector2 centre = camera.transform.position;
+                return new Rect(centre.x - width * 0.5f, centre.y - height * 0.5f, width, height);
+            }
+        }
+    }
 }
