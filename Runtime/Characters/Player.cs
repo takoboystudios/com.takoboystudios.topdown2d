@@ -293,6 +293,10 @@ namespace TakoBoyStudios.TopDown2D
         Vector2 _gripDirection = Vector2.down;
         bool _gripReleased;
 
+        // Where the last bomb was aimed and where it will come down, for Shift+D (T-501).
+        Vector2 _gripAimed;
+        Vector2 _gripLanding;
+
         // The swing in progress: its aim, whether another is queued behind it, and everything it has
         // already struck, so a target is hit once per swing however many active frames it stays in
         // the arc. Lists sized at setup and cleared per swing, so a swing never allocates.
@@ -1784,9 +1788,19 @@ namespace TakoBoyStudios.TopDown2D
                     // Rooted for the whole of it. Committing is what makes it cost something.
                     SetMoveDirection(Vector2.zero);
 
-                    // The way it was decided to go, for as long as it plays.
+                    // The way it was decided to go, for as long as it plays, and once a bomb is out,
+                    // where it will land: a cross, with a line back from the aimed spot if it had to be
+                    // pulled in off a wall or the edge of the screen (T-501).
                     if (DebugDraw.Enabled)
+                    {
                         DebugDraw.Line(Position, (Vector2)Position + _gripDirection * 20f, KnuckleColor);
+                        if (_gripReleased && grip.Equipped != null && grip.Equipped.BombPrefab != null)
+                        {
+                            DebugDraw.Cross(_gripLanding, 6f, KnuckleColor);
+                            if ((_gripAimed - _gripLanding).sqrMagnitude > 1f)
+                                DebugDraw.Line(_gripAimed, _gripLanding, KnuckleWindUpColor, 1f);
+                        }
+                    }
 
                     GripDefinition ability = grip.Equipped;
                     if (ability == null || _slotClip == null)
@@ -1861,8 +1875,66 @@ namespace TakoBoyStudios.TopDown2D
             // already stamp theirs; the player's throw was the one that did not.
             bomb.Instigator = this;
             bomb.Position = Position;
-            bomb.Lob((Vector2)Position + _gripDirection.normalized * ability.ThrowDistance);
+            _gripAimed = (Vector2)Position + _gripDirection.normalized * ability.ThrowDistance;
+            _gripLanding = LandingSpot(Position, _gripAimed);
+            bomb.Lob(_gripLanding);
             return true;
+        }
+
+        /// <summary>
+        /// Where a lobbed bomb comes down: the spot it was aimed at, or, when that is no good, the
+        /// last good spot back along the throw (T-501). Good means floor in the room's nav grid (never
+        /// a wall, a rock or outside the room) and inside the frame the players can see.
+        ///
+        /// A bomb flies over walls on purpose, so it can clear cover, and it still does. What it must
+        /// not do is land where nobody can see it: standing under the arena's top wall and throwing
+        /// north used to put it past the wall, off the top of the screen, where it went off unseen.
+        ///
+        /// Picks a cell, not a position (CLAUDE.md, Work in tiles): the substitute is the centre of a
+        /// walkable nav cell, so it cannot half-sit in a wall. An aimed spot that is already good is
+        /// used exactly as aimed. With no room grid (the lab, tests) only the frame applies; with
+        /// nothing good anywhere along the line, it lands at the thrower's feet.
+        /// </summary>
+        static Vector2 LandingSpot(Vector2 from, Vector2 aimed)
+        {
+            NavGrid grid = Nav.Grid;
+            Rect view = ScreenView.Current;
+            const float Inset = 8f;
+
+            if (GoodLanding(grid, view, Inset, aimed))
+                return aimed;
+
+            Vector2 delta = aimed - from;
+            float length = delta.magnitude;
+            if (length < 0.01f)
+                return from;
+
+            Vector2 direction = delta / length;
+            float step = grid != null ? grid.CellSize * 0.5f : 4f;
+            for (float distance = length - step; distance > 0f; distance -= step)
+            {
+                Vector2 spot = from + direction * distance;
+                if (!GoodLanding(grid, view, Inset, spot))
+                    continue;
+
+                if (grid != null && grid.TryWorldToCell(spot, out int x, out int y))
+                    return grid.CellToWorld(x, y);
+                return spot;
+            }
+
+            return from;
+        }
+
+        static bool GoodLanding(NavGrid grid, Rect view, float inset, Vector2 spot)
+        {
+            if (view.width > 0f
+                && (spot.x < view.xMin + inset || spot.x > view.xMax - inset
+                    || spot.y < view.yMin + inset || spot.y > view.yMax - inset))
+            {
+                return false;
+            }
+
+            return grid == null || grid.IsWalkableAt(spot);
         }
 
         /// <summary>
