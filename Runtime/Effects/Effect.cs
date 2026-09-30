@@ -150,13 +150,34 @@ namespace TakoBoyStudios.TopDown2D
         public override void Init()
         {
             base.Init();
+            _authoredArtOffset = character != null ? character.localPosition : Vector3.zero;
             Play();
         }
 
         public override void OnAcquired()
         {
             base.OnAcquired();
+
+            // Whoever spawned it last may have moved the art; a pooled effect starts where the
+            // prefab put it.
+            if (character != null)
+                character.localPosition = _authoredArtOffset;
             Play();
+        }
+
+        Vector3 _authoredArtOffset;
+
+        /// <summary>
+        /// Draws the art <paramref name="offset"/> away from the effect's position, without moving the
+        /// position itself: what it sorts by and where its damage box sits stay put. For a floor effect
+        /// spawned at a body's position that should be drawn at the body's feet, where the shadow is.
+        /// Call right after acquiring it; the next acquire puts the art back.
+        /// </summary>
+        public void SetArtOffset(Vector2 offset)
+        {
+            if (character == null)
+                return;
+            character.localPosition = _authoredArtOffset + (Vector3)offset;
         }
 
         bool _playingIntro;

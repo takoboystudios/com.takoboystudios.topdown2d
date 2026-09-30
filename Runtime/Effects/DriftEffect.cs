@@ -13,7 +13,7 @@ namespace TakoBoyStudios.TopDown2D
     /// So this stays an <see cref="Effect"/>: pooled, one animation, released when it finishes, and it
     /// simply moves while it plays.
     ///
-    /// **It floats at chest height, through hover, never through y.** A note leaves the body, not the
+    /// **It floats up the body, through hover, never through y.** A note leaves the body, not the
     /// floor, so its sprite is lifted by <see cref="startHeight"/> on the visual child while its
     /// position, which is what it sorts by, stays on the ground under it. Faking the lift by nudging y
     /// would sort it behind Grim on the frame it appears (CLAUDE.md, sorting rule two).
@@ -39,7 +39,7 @@ namespace TakoBoyStudios.TopDown2D
         float driftTime = 0.3f;
 
         [BoxGroup("Drift")]
-        [Tooltip("Height the sprite is drawn above its position when it appears, in pixels. Grim's chest is about 8, so the notes come out of him rather than the floor.")]
+        [Tooltip("Height the sprite is drawn above its position when it appears, in pixels. Spawned at Grim's position, which is already 8 above his feet, so 8 starts the notes about level with his shoulders, out of him rather than the floor.")]
         [SerializeField, MinValue(0f)]
         float startHeight = 8f;
 
