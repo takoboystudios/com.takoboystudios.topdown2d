@@ -896,6 +896,8 @@ namespace TakoBoyStudios.TopDown2D
         // ----------------------------
         // Utilities
         // ----------------------------
+        static readonly Vector3[] OffscreenCorners = new Vector3[8];
+
         public static bool IsOffscreen(Renderer renderer, Camera camera)
         {
             if (!renderer || !camera)
@@ -905,7 +907,9 @@ namespace TakoBoyStudios.TopDown2D
             Vector3 min = bounds.min;
             Vector3 max = bounds.max;
 
-            Vector3[] corners = new Vector3[8];
+            // A scratch array made once, not per call: this runs every frame for every live shot, and
+            // the per-call array it used to build was garbage on every one of those frames.
+            Vector3[] corners = OffscreenCorners;
             corners[0] = new Vector3(min.x, min.y, min.z);
             corners[1] = new Vector3(min.x, min.y, max.z);
             corners[2] = new Vector3(min.x, max.y, min.z);

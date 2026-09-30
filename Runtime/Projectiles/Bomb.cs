@@ -148,6 +148,13 @@ namespace TakoBoyStudios.TopDown2D
 
         #endregion
 
+        /// <summary>
+        /// Never killed for leaving the screen (T-503). The arc lifts it above where it really is, so a
+        /// throw toward the top of the screen takes the sprite past the edge mid-flight; it always ends
+        /// by landing and going off, which is its own despawn.
+        /// </summary>
+        protected override bool DespawnsOffscreen => false;
+
         #region Throwing
 
         /// <summary>

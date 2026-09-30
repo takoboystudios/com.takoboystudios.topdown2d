@@ -198,6 +198,14 @@ namespace TakoBoyStudios.TopDown2D
         // FSM States
         // -----------------------------
 
+        /// <summary>
+        /// Whether leaving the screen ends this projectile. True for a shot, which is not coming back.
+        /// A bomb says no (T-503): it is drawn up to its arc's height above where it really is, so a
+        /// throw toward the top of the screen lifted it past the edge mid-flight and it was killed in
+        /// the air, never landing and never going off. Anything that ends by landing overrides this.
+        /// </summary>
+        protected virtual bool DespawnsOffscreen => true;
+
         #region Knocking back
 
         /// <summary>
@@ -290,8 +298,9 @@ namespace TakoBoyStudios.TopDown2D
                         }
                     }
 
-                    // Check despawn conditions
-                    if (m_entityAnimator != null)
+                    // Check despawn conditions. A shot that leaves the screen is gone for good; a thing
+                    // that comes back down (a bomb) opts out, see DespawnsOffscreen.
+                    if (DespawnsOffscreen && m_entityAnimator != null)
                     {
                         var activeAnimator = m_entityAnimator.GetActiveAnimator();
                         if (

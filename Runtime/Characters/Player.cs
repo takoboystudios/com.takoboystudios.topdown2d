@@ -1790,7 +1790,7 @@ namespace TakoBoyStudios.TopDown2D
 
                     // The way it was decided to go, for as long as it plays, and once a bomb is out,
                     // where it will land: a cross, with a line back from the aimed spot if it had to be
-                    // pulled in off a wall or the edge of the screen (T-501).
+                    // pulled in off the edge of the screen (T-501).
                     if (DebugDraw.Enabled)
                     {
                         DebugDraw.Line(Position, (Vector2)Position + _gripDirection * 20f, KnuckleColor);
@@ -1882,26 +1882,20 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         /// <summary>
-        /// Where a lobbed bomb comes down: the spot it was aimed at, or, when that is no good, the
-        /// last good spot back along the throw (T-501). Good means floor in the room's nav grid (never
-        /// a wall, a rock or outside the room) and inside the frame the players can see.
+        /// Where a lobbed bomb comes down: the spot it was aimed at, pulled back along the throw only if
+        /// that spot is outside the frame the players can see (8 px in), so a bomb never goes off where
+        /// nobody can see it (T-501). Anywhere on screen it lands exactly as aimed, walls and rocks
+        /// included, the way it always has; a bomb flies over cover on purpose.
         ///
-        /// A bomb flies over walls on purpose, so it can clear cover, and it still does. What it must
-        /// not do is land where nobody can see it: standing under the arena's top wall and throwing
-        /// north used to put it past the wall, off the top of the screen, where it went off unseen.
-        ///
-        /// Picks a cell, not a position (CLAUDE.md, Work in tiles): the substitute is the centre of a
-        /// walkable nav cell, so it cannot half-sit in a wall. An aimed spot that is already good is
-        /// used exactly as aimed. With no room grid (the lab, tests) only the frame applies; with
-        /// nothing good anywhere along the line, it lands at the thrower's feet.
+        /// The first version also pulled bombs back off walls and rocks onto nav-grid floor. The owner
+        /// found that looked odd, and the vanishing it was chasing was really the offscreen despawn
+        /// (T-503), so that part is gone.
         /// </summary>
         static Vector2 LandingSpot(Vector2 from, Vector2 aimed)
         {
-            NavGrid grid = Nav.Grid;
             Rect view = ScreenView.Current;
             const float Inset = 8f;
-
-            if (GoodLanding(grid, view, Inset, aimed))
+            if (view.width <= 0f || InsideFrame(view, Inset, aimed))
                 return aimed;
 
             Vector2 delta = aimed - from;
@@ -1910,32 +1904,19 @@ namespace TakoBoyStudios.TopDown2D
                 return from;
 
             Vector2 direction = delta / length;
-            float step = grid != null ? grid.CellSize * 0.5f : 4f;
-            for (float distance = length - step; distance > 0f; distance -= step)
+            for (float distance = length - 2f; distance > 0f; distance -= 2f)
             {
                 Vector2 spot = from + direction * distance;
-                if (!GoodLanding(grid, view, Inset, spot))
-                    continue;
-
-                if (grid != null && grid.TryWorldToCell(spot, out int x, out int y))
-                    return grid.CellToWorld(x, y);
-                return spot;
+                if (InsideFrame(view, Inset, spot))
+                    return spot;
             }
 
             return from;
         }
 
-        static bool GoodLanding(NavGrid grid, Rect view, float inset, Vector2 spot)
-        {
-            if (view.width > 0f
-                && (spot.x < view.xMin + inset || spot.x > view.xMax - inset
-                    || spot.y < view.yMin + inset || spot.y > view.yMax - inset))
-            {
-                return false;
-            }
-
-            return grid == null || grid.IsWalkableAt(spot);
-        }
+        static bool InsideFrame(Rect view, float inset, Vector2 spot) =>
+            spot.x >= view.xMin + inset && spot.x <= view.xMax - inset
+            && spot.y >= view.yMin + inset && spot.y <= view.yMax - inset;
 
         /// <summary>
         /// The shockwave, at the feet. It is an Effect: its art is the ring on the floor and its damage
