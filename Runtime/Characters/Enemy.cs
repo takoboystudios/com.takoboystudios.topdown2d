@@ -643,7 +643,8 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>
         /// Plays an animation with the direction suffix for the way the enemy is facing, for
         /// example PlayDirectional("walk") becomes "walk-ne". Falls back through the mirrored
-        /// direction and then "-s" if the exact one does not exist.
+        /// direction and then "-s" if the exact one does not exist, and last to the bare name for
+        /// art drawn with no facing ("fly").
         /// </summary>
         protected void PlayDirectional(string baseName)
         {

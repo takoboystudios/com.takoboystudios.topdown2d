@@ -158,6 +158,16 @@ namespace TakoBoyStudios.TopDown2D
                 _fbReqDir = directionStr;
                 _fbFlipX = flip;
                 _fbResolved = fullBodyAnimator.HasAnimation(full) ? full : null;
+
+                // Art drawn with no facing at all, a bat or a slime, is named without a suffix:
+                // "fly", not "fly-e". Asked for a facing it does not have, play the one clip there is,
+                // unflipped. Without this the animator found nothing, played nothing and said nothing,
+                // and the Batbat hung on one frame for its whole life (T-516).
+                if (_fbResolved == null && fullBodyAnimator.HasAnimation(animBase))
+                {
+                    _fbResolved = animBase;
+                    _fbFlipX = false;
+                }
             }
 
             if (_fbResolved == null)
