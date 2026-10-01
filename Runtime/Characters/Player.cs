@@ -230,9 +230,18 @@ namespace TakoBoyStudios.TopDown2D
         float blinkInterval = 0.08f;
 
         [BoxGroup("Revive")]
-        [Tooltip("How close a partner has to stand to a downed player's ghost to revive them with Interact, in pixels. A tile and a half is 24.")]
+        [Tooltip("How close a partner has to stand to a downed player's ghost to revive them, in pixels. A tile and a half is 24.")]
         [SerializeField, MinValue(0f)]
         float reviveRange = 24f;
+
+        [BoxGroup("Revive")]
+        [Tooltip(
+            "How long a partner stands still beside the ghost, not moving and not aiming, before they kneel "
+                + "to revive it, in seconds. There is no button (T-512); this pause is what stops a player "
+                + "walking past from being rooted. ~0.25."
+        )]
+        [SerializeField, MinValue(0f)]
+        float reviveSettleTime = 0.25f;
 
         [BoxGroup("Revive")]
         [Tooltip("How long the reviver kneels, rooted, before the ghost comes back, in seconds. A hit cancels it. ~1.2.")]
@@ -253,6 +262,10 @@ namespace TakoBoyStudios.TopDown2D
         bool _resurrecting;
         Player _reviveTarget;
         float _reviveTimer;
+        float _reviveSettle;
+
+        /// <summary>How far a stick has to move before it counts as steering or aiming, for the revive.</summary>
+        const float ReviveStickDeadZone = 0.2f;
 
         PlayerInput _playerInput;
         InputAction _moveAction;
@@ -317,12 +330,20 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public bool InputLocked { get; set; }
 
+        /// <summary>
+        /// While set, the guns are put away: no shooting, no throw, no melee and no Brand. Moving and
+        /// jumping still work. The game sets it for hub rooms (the tavern, T-511): there is nothing to
+        /// fight there, and on a gamepad the face buttons that shoot are wanted for talking.
+        /// </summary>
+        public bool Holstered { get; set; }
+
         InputAction _submitAction;
         InputAction _navigateAction;
         InputAction _interactAction;
 
         /// <summary>
-        /// The gameplay map's Interact, what a player presses to take the thing they are standing at.
+        /// The gameplay map's Interact: the press that rerolls a Perk offer. Nothing else in the Wilds uses
+        /// it; Perks are taken by jumping into them and a partner is revived by standing with them (T-506).
         ///
         /// **Deliberately on the gameplay map and not UI/Submit.** Reaching for Submit would mean
         /// pushing the UI map, which turns the gameplay map off entirely, and the whole point of an
@@ -881,14 +902,44 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         /// <summary>
-        /// Starts reviving a downed partner in reach, on Interact. The nearest one wins. Walks the seats
-        /// by index, so a press allocates nothing.
+        /// Starts reviving a downed partner once this player has stood still beside one, not moving and
+        /// not aiming, for <see cref="reviveSettleTime"/> (T-512). No button: the partner is revived by
+        /// standing with them, the way Isaac takes things by touch, and waiting for the player to stop is
+        /// what keeps walking past from rooting anyone. The nearest partner wins.
         /// </summary>
-        bool TryStartRevive()
+        bool TryStartRevive(float deltaTime)
         {
-            if (!InteractPressed)
+            Player best = InputLocked || IsSteeringOrAiming() ? null : NearestDownedPartner();
+            if (best == null)
+            {
+                _reviveSettle = 0f;
+                return false;
+            }
+
+            _reviveSettle += deltaTime;
+            if (_reviveSettle < reviveSettleTime)
                 return false;
 
+            _reviveSettle = 0f;
+            _reviveTarget = best;
+            m_fsm.ChangeState((int)PlayerState.Reviving);
+            return true;
+        }
+
+        /// <summary>True while either stick (or the keys) is steering or aiming. Stops a revive starting, and cancels one under way.</summary>
+        bool IsSteeringOrAiming()
+        {
+            Vector2 move = _moveAction != null ? _moveAction.ReadValue<Vector2>() : Vector2.zero;
+            if (move.sqrMagnitude > ReviveStickDeadZone * ReviveStickDeadZone)
+                return true;
+
+            Vector2 aim = _shootAction != null ? _shootAction.ReadValue<Vector2>() : Vector2.zero;
+            return Aim.IsAiming(aim);
+        }
+
+        /// <summary>The nearest downed partner within <see cref="reviveRange"/>, or null. Walks the seats by index, so it allocates nothing.</summary>
+        Player NearestDownedPartner()
+        {
             Player best = null;
             float bestDistance = reviveRange;
             int seats = Players.SeatCount;
@@ -906,18 +957,14 @@ namespace TakoBoyStudios.TopDown2D
                 }
             }
 
-            if (best == null)
-                return false;
-
-            _reviveTarget = best;
-            m_fsm.ChangeState((int)PlayerState.Reviving);
-            return true;
+            return best;
         }
 
         /// <summary>
         /// Kneeling over a downed partner (T-438). Rooted and not shooting for
         /// <see cref="reviveDuration"/>, then the partner resurrects. Committing is the cost: a hit
-        /// moves this player to Damaged, which ends the revive, and the partner stays down.
+        /// moves this player to Damaged, which ends the revive, and the partner stays down. Steering or
+        /// aiming gets up again (T-512), since there is no button to let go of.
         /// </summary>
         void StateReviving(Fsm.StateStep step, float deltaTime)
         {
@@ -937,6 +984,14 @@ namespace TakoBoyStudios.TopDown2D
 
                     // Someone else got there first, or the partner left the game.
                     if (_reviveTarget == null || !_reviveTarget.IsDowned)
+                    {
+                        _reviveTarget = null;
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                        break;
+                    }
+
+                    // Changed their mind: moving or aiming stands back up and the partner stays down.
+                    if (!InputLocked && IsSteeringOrAiming())
                     {
                         _reviveTarget = null;
                         m_fsm.ChangeState((int)EntityState.Idle);
@@ -974,7 +1029,7 @@ namespace TakoBoyStudios.TopDown2D
             if (TickScriptedWalk(deltaTime))
                 return;
 
-            if (TryStartRevive())
+            if (TryStartRevive(deltaTime))
                 return;
 
             HandleMovementInput(deltaTime);
@@ -1050,7 +1105,7 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         void HandleGripInput()
         {
-            if (InputLocked || _gripAction == null || !_gripAction.WasPressedThisFrame())
+            if (InputLocked || Holstered || _gripAction == null || !_gripAction.WasPressedThisFrame())
                 return;
 
             // Out of uses, or nothing equipped: nothing, not even the wind-up, so an empty grip reads
@@ -1078,7 +1133,7 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>Swings the Knuckle ability on the press. Aimed the same way the Grip is: BodyFacing.</summary>
         void HandleKnuckleInput()
         {
-            if (InputLocked || _knuckleAction == null || !_knuckleAction.WasPressedThisFrame() || !knuckle.Ready)
+            if (InputLocked || Holstered || _knuckleAction == null || !_knuckleAction.WasPressedThisFrame() || !knuckle.Ready)
                 return;
 
             m_fsm.ChangeState((int)PlayerState.Knuckle);
@@ -1586,7 +1641,9 @@ namespace TakoBoyStudios.TopDown2D
             _shootDirection = Vector2.zero;
             _aimReleasedFacing = Vector2.zero;
 
-            if (InputLocked)
+            // Holstered (a hub room, T-511) reads the same as locked here: the aim buttons do nothing at
+            // all, rather than turning the body toward a shot that never comes.
+            if (InputLocked || Holstered)
             {
                 _heldAim = Vector2.zero;
                 _aimLiftAt = -1f;
@@ -2238,7 +2295,7 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>Starts the Brand on the press, if one is equipped with a use left.</summary>
         void HandleBrandInput()
         {
-            if (InputLocked || _brandAction == null || !_brandAction.WasPressedThisFrame() || !brand.Ready)
+            if (InputLocked || Holstered || _brandAction == null || !_brandAction.WasPressedThisFrame() || !brand.Ready)
                 return;
 
             m_fsm.ChangeState((int)PlayerState.Brand);

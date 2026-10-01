@@ -18,10 +18,22 @@ namespace TakoBoyStudios.TopDown2D
     ///
     /// The rain and the notes are show, not damage. The damage is the one sweep at the end, so nothing
     /// depends on where a bomb happened to land, and nothing can be missed because it stood between two.
+    ///
+    /// **Carried, not charged** (owner, 2026-10-01, T-508): there is no meter. A player holds a count, the
+    /// way a Gungeon Blank works: <see cref="SlotDefinition.Uses"/> to start a run with,
+    /// <see cref="SlotDefinition.MaxUses"/> at most, and a rest campfire gives one back.
     /// </summary>
     [CreateAssetMenu(menuName = "TopDown2D/Brand", fileName = "Brand")]
     public class BrandDefinition : SlotDefinition
     {
+        [BoxGroup("HUD")]
+        [Tooltip(
+            "The small icon the HUD draws once for each one carried, in place of a meter (T-510). Drawn at "
+                + "its own size, so keep it small: about 9 by 9. Empty draws the slot icon instead."
+        )]
+        [SerializeField, PreviewField(32)]
+        Sprite chargeIcon;
+
         [BoxGroup("Animation")]
         [Tooltip("The clip set that loops while the world is frozen, without the facing: 'guitar-ultimate-loop'. Played again each time it ends.")]
         [SerializeField]
@@ -113,6 +125,9 @@ namespace TakoBoyStudios.TopDown2D
         [Tooltip("Pops every enemy shot on screen as the world comes back, the published Mega Riff's panic button.")]
         [SerializeField]
         bool clearsEnemyShots = true;
+
+        /// <summary>The HUD's icon per carried use: <see cref="chargeIcon"/>, or the slot icon when none is set.</summary>
+        public Sprite ChargeIcon => chargeIcon != null ? chargeIcon : Icon;
 
         public string LoopAnimation => loopAnimation;
         public string RecoveryAnimation => recoveryAnimation;

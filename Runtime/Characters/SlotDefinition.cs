@@ -8,9 +8,12 @@ namespace TakoBoyStudios.TopDown2D
     /// the way the HUD and the design name them (owner, 2026-09-29):
     ///
     /// - **Grip**, the throw slot: <see cref="GripDefinition"/> (the Bomb, the Guitar Riff)
-    /// - **Knuckle**, the melee slot: <see cref="KnuckleDefinition"/> (the Guitar Bash)
+    /// - **Knuckle**, the melee slot: <see cref="KnuckleDefinition"/>. Kept for Sen; Grim has no melee
+    ///   since 2026-10-01 (T-507), and the Guitar Bash asset waits unused.
+    /// - **Brand**, the special: <see cref="BrandDefinition"/> (the Mega Riff), carried as uses with
+    ///   no meter, the way a Gungeon Blank is (T-508).
     ///
-    /// Trigger (the gun) and Brand (the special) come later on the same base.
+    /// Trigger (the gun) comes later on the same base.
     ///
     /// What lives here is only what the player code treats the same way for every slot: who it is,
     /// its icon, the body clip it plays, and how many uses it has. What it *does* is the subclass's.
@@ -54,6 +57,14 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField, MinValue(-1)]
         int uses = -1;
 
+        [BoxGroup("Uses")]
+        [Tooltip(
+            "The most it can hold. A rest or a pickup gives uses back up to this and no further. 0 means "
+                + "the starting count is the most. The Mega Riff starts with 1 and holds 2."
+        )]
+        [SerializeField, MinValue(0), ShowIf("@uses >= 0")]
+        int maxUses;
+
         public string Id => id;
         public string DisplayName => displayName;
         public Sprite Icon => icon;
@@ -61,6 +72,9 @@ namespace TakoBoyStudios.TopDown2D
 
         /// <summary>Uses a player starts a run with. Negative means it never runs out.</summary>
         public int Uses => uses;
+
+        /// <summary>The most uses it can hold: <see cref="maxUses"/>, or the starting count when that is higher.</summary>
+        public int MaxUses => Mathf.Max(uses, maxUses);
 
         /// <summary>
         /// How many clip sets this ability plays. One for a throw or a swing; the Brand has an intro, a

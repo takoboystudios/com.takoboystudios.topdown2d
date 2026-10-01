@@ -79,6 +79,24 @@ namespace TakoBoyStudios.TopDown2D
                 _uses--;
         }
 
+        /// <summary>
+        /// Gives uses back, up to the equipped ability's <see cref="SlotDefinition.MaxUses"/>: a rest
+        /// campfire returning a Mega Riff, a pickup. False when nothing changed, because nothing is
+        /// equipped, it never runs out, or it is already full.
+        /// </summary>
+        public bool Restore(int amount)
+        {
+            if (_equipped == null || _uses < 0 || amount <= 0)
+                return false;
+
+            int most = _equipped.MaxUses;
+            if (_uses >= most)
+                return false;
+
+            _uses = Mathf.Min(most, _uses + amount);
+            return true;
+        }
+
         public int IndexOf(SlotDefinition ability)
         {
             for (int i = 0; i < Count; i++)
