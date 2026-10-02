@@ -640,6 +640,19 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         /// <summary>
+        /// True once the current one-shot clip has played out, its last frame's time included. A
+        /// looping clip never finishes. See SpriteAnimation.HasFinished.
+        /// </summary>
+        public bool HasFinished
+        {
+            get
+            {
+                SpriteAnimation active = GetActiveAnimator();
+                return active ? active.HasFinished : true;
+            }
+        }
+
+        /// <summary>
         /// Returns true if the current animation is done playing
         /// </summary>
         public bool IsDone

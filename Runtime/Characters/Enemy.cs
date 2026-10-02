@@ -135,8 +135,15 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>Current frame of the playing animation. Use to time actions to the art.</summary>
         public int AnimationFrame => m_entityAnimator != null ? m_entityAnimator.CurrentFrame : 0;
 
-        /// <summary>True once the current animation has finished playing.</summary>
+        /// <summary>True once the current animation has reached its last frame. That frame's own time is not waited for.</summary>
         public bool AnimationDone => m_entityAnimator == null || m_entityAnimator.IsDone;
+
+        /// <summary>
+        /// True once the current one-shot clip has played out, every frame's authored time included.
+        /// Wait on this to let the art time a move (CLAUDE.md, "Animation timing: in the asset"). A
+        /// looping clip never finishes.
+        /// </summary>
+        public bool AnimationFinished => m_entityAnimator == null || m_entityAnimator.HasFinished;
 
         #endregion
 
