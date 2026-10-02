@@ -24,6 +24,19 @@ namespace TakoBoyStudios.TopDown2D
 
         #region States
 
+        /// <summary>
+        /// Plays the death and removes the body when it has finished. Three things made a body stand
+        /// in the world forever (T-522, 2026-10-02), each guarded here:
+        ///
+        /// - A behaviour that holds a frame by setting the body's speed to 0 (the Boar Pistol's draw,
+        ///   the Corvidden stuck in a wall) and dies mid-hold played its death at speed 0, which never
+        ///   finishes. Death always plays at normal speed, unpaused.
+        /// - The death was looked up by exact facing only, so art with just death-s, killed facing
+        ///   east, kept its current clip. It now falls back the way every other directional clip does:
+        ///   the mirror, then -s, then the bare name.
+        /// - Art with no death clip at all left whatever was playing, which a looping walk never
+        ///   finishes. With no death to play, the body is removed at once.
+        /// </summary>
         protected override void StateDead(Fsm.StateStep step, float deltaTime)
         {
             switch (step)
@@ -31,15 +44,44 @@ namespace TakoBoyStudios.TopDown2D
                 case Fsm.StateStep.Enter:
                     m_moveInput = Vector2.zero;
                     m_impulseVelocity = Vector2.zero;
-                    Vector2 faceDirection = GetAnimationFacingDirection();
-                    Direction direction = faceDirection.ToDirection();
-                    PlayAnimationWithDirection(AnimConst.Death, direction);
+                    _deathPlaying = PlayDeath(GetAnimationFacingDirection());
                     break;
                 case Fsm.StateStep.Update:
-                    if (m_entityAnimator.IsDone)
+                    if (!_deathPlaying || m_entityAnimator == null || m_entityAnimator.IsDone)
                         Dispose();
                     break;
             }
+        }
+
+        bool _deathPlaying;
+
+        /// <summary>The death clip for this facing or its fallback, at normal speed. False when there is none.</summary>
+        bool PlayDeath(Vector2 faceDirection)
+        {
+            if (!m_entityAnimator)
+                return false;
+
+            SpriteAnimation body = m_entityAnimator.FullBodyAnimator;
+            if (body != null)
+            {
+                body.speedRatio = 1f;
+                if (body.paused)
+                    body.Pause(false);
+            }
+
+            string exact = $"{AnimConst.Death}-{faceDirection.ToDirection().ToAnimId()}";
+            if (m_entityAnimator.HasAnimation(exact))
+            {
+                if (!m_entityAnimator.CurrentAnimationName.Equals(exact))
+                    m_entityAnimator.Play(exact);
+            }
+            else
+            {
+                m_entityAnimator.PlaySimpleAnimation(AnimConst.Death, faceDirection);
+            }
+
+            string playing = m_entityAnimator.CurrentAnimationName;
+            return playing != null && playing.StartsWith(AnimConst.Death);
         }
 
         #endregion
