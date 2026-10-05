@@ -219,6 +219,15 @@ namespace TakoBoyStudios.TopDown2D
             return muzzleOffset;
         }
 
+        /// <summary>
+        /// Where a shot from this muzzle offset is drawn: its footing raised by muzzleHeight, which is
+        /// hover. The handles and gizmos sit here, so dragging one moves the shot you see. Drawn at the
+        /// footing instead, a gun with any height had handles at the feet and shots at the chest, and
+        /// moving a handle seemed to do nothing (T-523).
+        /// </summary>
+        public Vector3 MuzzleDrawPosition(Vector2 offset) =>
+            transform.TransformPoint(offset) + Vector3.up * muzzleHeight;
+
         public Vector3 MuzzleWorldPosition(Vector2 shootDirection) =>
             transform.TransformPoint(MuzzleLocal(shootDirection));
 
@@ -304,9 +313,11 @@ namespace TakoBoyStudios.TopDown2D
         {
             if (!usesDirectionalMuzzle)
             {
-                Vector3 at = transform.TransformPoint(muzzleOffset);
+                Vector3 at = MuzzleDrawPosition(muzzleOffset);
                 Gizmos.color = Color.white;
                 Gizmos.DrawWireSphere(at, 1.5f);
+                if (muzzleHeight != 0f)
+                    Gizmos.DrawLine(at, transform.TransformPoint(muzzleOffset));
                 UnityEditor.Handles.Label(at + new Vector3(2f, 2f, 0f), "muzzle");
                 return;
             }
@@ -316,10 +327,13 @@ namespace TakoBoyStudios.TopDown2D
             {
                 if (!muzzleAuthored[i])
                     continue;
-                Vector3 at = transform.TransformPoint(muzzleOffsets[i]);
+                // The dot is where the shot is drawn; the line runs down to where it stands, which is
+                // what it sorts by.
+                Vector3 footing = transform.TransformPoint(muzzleOffsets[i]);
+                Vector3 at = MuzzleDrawPosition(muzzleOffsets[i]);
                 Gizmos.color = MuzzleColour(i);
                 Gizmos.DrawSphere(at, 1.2f);
-                Gizmos.DrawLine(transform.position, at);
+                Gizmos.DrawLine(footing, at);
                 UnityEditor.Handles.Label(at + new Vector3(2f, 2f, 0f), MuzzleNames[i]);
             }
         }
