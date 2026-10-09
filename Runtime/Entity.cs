@@ -157,6 +157,14 @@ namespace TakoBoyStudios.TopDown2D
         public virtual Vector2 ImpulseVelocity => Vector2.zero;
         public Vector2 LastMoveDirection => m_lastMoveDirection;
         public float Weight => m_weight;
+
+        /// <summary>
+        /// How much of a hit's push this body takes: 100 over its weight, the way mass works in Binding
+        /// of Isaac (owner, 2026-10-08). 100 takes the push as authored, 50 twice it (up to the impulse
+        /// cap), 200 half, 500 a fifth. A push never interrupts what the body is doing; it only moves
+        /// it. Shoves have their own resistance (PhysicsEntity.Shove).
+        /// </summary>
+        public float KnockbackScale => m_weight > 0.01f ? 100f / m_weight : 1f;
         public Element Element => m_element;
 
         public EntityAnimator Animator
@@ -691,7 +699,7 @@ namespace TakoBoyStudios.TopDown2D
             if (shoves)
                 Shove(info.knockbackDirection, info.values.shoveDistance, info.values.shoveTime);
             else
-                AddImpulse(knockback);
+                AddImpulse(knockback * KnockbackScale);
 
             // Forced movement from a hit is a Displacement, which is what Bleed pays off on and what
             // a displacement-triggered Perk fires from. Walking is not this, and neither is a dash:

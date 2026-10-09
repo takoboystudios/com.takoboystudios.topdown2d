@@ -86,7 +86,7 @@ namespace TakoBoyStudios.TopDown2D
 
         /// <summary>The shove, in the direction the hit was travelling.</summary>
         public Vector2 GetFinalKnockback() =>
-            IsValid ? knockbackDirection * values.knockback : Vector2.zero;
+            IsValid ? knockbackDirection * RunStats.KnockbackFor(source, values.knockback) : Vector2.zero;
 
         /// <summary>
         /// The freeze on both parties at the moment of impact, in frames. Scales with damage so a

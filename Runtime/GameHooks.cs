@@ -54,6 +54,13 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public static Func<Entity, float, float> ShotRange;
 
+        /// <summary>
+        /// Given the source of a hit and the push it carries, the push it actually gives: the
+        /// attacker's knockback stat (Force, in Hell Wilds). Followed back to whoever is responsible,
+        /// as damage is.
+        /// </summary>
+        public static Func<Entity, float, float> Knockback;
+
         public static float OutgoingDamageFor(Entity entity, float baseDamage) =>
             entity != null && OutgoingDamage != null ? OutgoingDamage(entity, baseDamage) : baseDamage;
 
@@ -63,12 +70,16 @@ namespace TakoBoyStudios.TopDown2D
         public static float ShotRangeFor(Entity shot, float baseRange) =>
             shot != null && ShotRange != null ? ShotRange(shot, baseRange) : baseRange;
 
+        public static float KnockbackFor(Entity source, float baseKnockback) =>
+            source != null && Knockback != null && baseKnockback > 0f ? Knockback(source, baseKnockback) : baseKnockback;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void Clear()
         {
             OutgoingDamage = null;
             MoveSpeed = null;
             ShotRange = null;
+            Knockback = null;
         }
     }
 
