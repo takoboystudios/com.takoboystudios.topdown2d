@@ -36,6 +36,19 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public const float DefaultAgentRadius = 3f;
 
+        /// <summary>
+        /// The most clearance a cell records, in cells. Past two cells (a tile) nothing reads it, and
+        /// capping it keeps the build pass short.
+        /// </summary>
+        public const int MaxClearance = 4;
+
+        /// <summary>
+        /// The clearance of a cell with one free cell between it and the nearest wall. Every walkable
+        /// cell has at least 1 (it is one step from something), so this, not 1, is what "keeps off the
+        /// wall" means in a line test.
+        /// </summary>
+        public const int OneCellToSpare = 2;
+
         public int Width { get; private set; }
         public int Height { get; private set; }
         public float CellSize { get; private set; }
@@ -44,6 +57,10 @@ namespace TakoBoyStudios.TopDown2D
         public Vector2 Origin { get; private set; }
 
         bool[] _walkable;
+
+        // How many cells each cell is from the nearest blocked one or the grid's edge, capped at
+        // MaxClearance. Zero for a blocked cell. Built once with the grid.
+        byte[] _clearance;
 
         public int Count => Width * Height;
 
@@ -89,17 +106,96 @@ namespace TakoBoyStudios.TopDown2D
                     grid._walkable[y * grid.Width + x] = true;
             }
 
-            if (blockers == null)
-                return grid;
-
-            for (int i = 0; i < blockers.Count; i++)
+            if (blockers != null)
             {
-                Rect grown = Grow(blockers[i], agentRadius);
-                grid.BlockRect(grown);
+                for (int i = 0; i < blockers.Count; i++)
+                {
+                    Rect grown = Grow(blockers[i], agentRadius);
+                    grid.BlockRect(grown);
+                }
             }
 
+            grid.ComputeClearance();
             return grid;
         }
+
+        /// <summary>
+        /// Fills in how far every cell is from a wall, as a breadth-first pass out from every blocked
+        /// cell and the grid's edge, counting diagonal steps as one.
+        ///
+        /// This is what keeps a route off the walls without closing the room. Inflating the walls by
+        /// a body's radius was tried and blocked two thirds of a real room; recording the distance
+        /// instead lets the search prefer the middle of a corridor and give a pillar a body's width,
+        /// while still squeezing through a narrow gap when that is the only way.
+        /// </summary>
+        void ComputeClearance()
+        {
+            int count = Width * Height;
+            _clearance = new byte[count];
+            int[] queue = new int[count * 2];
+            int head = 0;
+            int tail = 0;
+
+            for (int i = 0; i < count; i++)
+            {
+                if (_walkable[i])
+                {
+                    _clearance[i] = MaxClearance;
+                    continue;
+                }
+                _clearance[i] = 0;
+                queue[tail++] = i;
+            }
+
+            // Past the edge counts as a wall: the room's own walls sit there, and a grid with none
+            // should still not route along its border as if it were open floor.
+            for (int y = 0; y < Height; y++)
+            {
+                for (int x = 0; x < Width; x++)
+                {
+                    if (x != 0 && y != 0 && x != Width - 1 && y != Height - 1)
+                        continue;
+                    int i = y * Width + x;
+                    if (_walkable[i] && _clearance[i] > 1)
+                    {
+                        _clearance[i] = 1;
+                        queue[tail++] = i;
+                    }
+                }
+            }
+
+            while (head < tail)
+            {
+                int cell = queue[head++];
+                int next = _clearance[cell] + 1;
+                if (next > MaxClearance)
+                    continue;
+
+                int cx = cell % Width;
+                int cy = cell / Width;
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0)
+                            continue;
+                        int nx = cx + dx;
+                        int ny = cy + dy;
+                        if (nx < 0 || ny < 0 || nx >= Width || ny >= Height)
+                            continue;
+                        int n = ny * Width + nx;
+                        if (_clearance[n] <= next || tail >= queue.Length)
+                            continue;
+                        _clearance[n] = (byte)next;
+                        queue[tail++] = n;
+                    }
+                }
+            }
+        }
+
+        /// <summary>Cells from this one to the nearest wall or edge: 0 for a blocked cell or one off the grid.</summary>
+        public int ClearanceOf(int x, int y) =>
+            x >= 0 && y >= 0 && x < Width && y < Height ? _clearance[y * Width + x] : 0;
 
         static Rect Grow(Rect rect, float by) =>
             new Rect(rect.xMin - by, rect.yMin - by, rect.width + by * 2f, rect.height + by * 2f);
@@ -208,6 +304,38 @@ namespace TakoBoyStudios.TopDown2D
             {
                 Vector2 point = Vector2.Lerp(from, to, (float)i / steps);
                 if (!TryWorldToCell(point, out int x, out int y) || !IsWalkable(x, y))
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Whether a straight line between two points stays on walkable ground and keeps at least
+        /// <paramref name="minClearance"/> cells from any wall along the way.
+        ///
+        /// The ends are let off the clearance test for a cell's length: a body standing against a wall,
+        /// or a player backed into a corner, is where a line normally starts or finishes, and it is the
+        /// stretch between them that must not shave a pillar.
+        /// </summary>
+        public bool HasClearLine(Vector2 from, Vector2 to, int minClearance)
+        {
+            float distance = Vector2.Distance(from, to);
+            int steps = Mathf.CeilToInt(distance / (CellSize * 0.5f));
+            if (steps <= 0)
+                return true;
+
+            for (int i = 0; i <= steps; i++)
+            {
+                float t = (float)i / steps;
+                Vector2 point = Vector2.Lerp(from, to, t);
+                if (!TryWorldToCell(point, out int x, out int y) || !IsWalkable(x, y))
+                    return false;
+
+                float along = distance * t;
+                if (along < CellSize || distance - along < CellSize)
+                    continue;
+                if (_clearance[y * Width + x] < minClearance)
                     return false;
             }
 

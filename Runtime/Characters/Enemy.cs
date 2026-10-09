@@ -184,6 +184,9 @@ namespace TakoBoyStudios.TopDown2D
 
             // A body from the pool may be mid-flash from its last life.
             _hitFlash.Bind(character);
+
+            // And may still hold a route through the last room it was in.
+            _route.Clear();
         }
 
         void OnHitForFlash(HitEvent hitEvent) => _hitFlash.Play();
@@ -538,12 +541,8 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         /// <summary>
-        /// Moves at the player, around the room rather than into it.
-        ///
-        /// It used to head straight there and let the motor stop it, which reads as intent until a
-        /// wall is in the way and then reads as an animal walking into glass. With a nav grid it
-        /// walks the route; without one it steers with the whiskers as before, which is what keeps
-        /// the lab and any room with no grid behaving exactly as they did.
+        /// Moves at the player, around the room rather than into it. <see cref="Seek"/> with the
+        /// player as the goal.
         /// </summary>
         protected void Chase(float speed)
         {
@@ -551,27 +550,124 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         /// <summary>The direction to walk to reach the player. Public-ish so a state machine can face it.</summary>
-        protected Vector2 ChaseHeading()
+        protected Vector2 ChaseHeading() =>
+            player != null ? SeekHeading(player.Position) : Vector2.zero;
+
+        /// <summary>
+        /// Walks to a place the way a body would: straight when the way is clear, along a route round
+        /// walls and pillars when it is not (T-546). Use it for every walk that means "go there": to the
+        /// player, to a lane to line up on, to an empty cannon. Not for a committed move (a lunge, a
+        /// charge, a hop, a slam), which goes in a straight line on purpose and is meant to hit what is
+        /// in the way.
+        ///
+        /// It used to be that only the chase did this and every other walk headed straight for its
+        /// target and let the motor stop it, which reads as intent until a pillar is in the way and then
+        /// reads as an animal walking into glass.
+        /// </summary>
+        protected void Seek(Vector2 goal, float speed, float stopDistance = 2f)
         {
-            Vector2 direct = DirectionToPlayer;
-            if (player == null)
-                return direct;
-
-            _route ??= new PathFollower();
-
-            if (Nav.Grid != null
-                && _route.TryHeading(Nav.Grid, Position, player.Position, Time.deltaTime, out Vector2 routed))
+            if (((Vector2)Position - goal).sqrMagnitude <= stopDistance * stopDistance)
             {
+                StopMoving();
+                return;
+            }
+            Move(SeekHeading(goal), speed);
+        }
+
+        /// <summary>The direction <see cref="Seek"/> would walk this frame. For a state that moves itself but wants the route.</summary>
+        protected Vector2 SeekHeading(Vector2 goal)
+        {
+            Vector2 direct = goal - (Vector2)Position;
+            if (direct.sqrMagnitude < 0.0001f)
+                return Vector2.zero;
+
+            NavGrid grid = Nav.Grid;
+            if (grid != null && _route.TryHeading(grid, Position, goal, Time.deltaTime, out Vector2 routed))
+            {
+                if (DebugDraw.Enabled)
+                    DrawRoute(goal);
                 return routed;
             }
 
+            // No grid (the lab, the tests) or no way through: the whiskers, as before.
             return SteerAround(direct, ChaseLookAhead);
         }
 
-        /// <summary>How far ahead the fallback whiskers look, in pixels. About a body and a half.</summary>
+        /// <summary>
+        /// A free direction close to the one wanted: the wanted one if the floor ahead is open for
+        /// <paramref name="lookAhead"/> pixels, otherwise the smallest turn either way that is, otherwise
+        /// zero. For moves that are a direction rather than a destination: a wander, a sway across the
+        /// player's line, backing away. Without it those walk into the first wall they meet and stand
+        /// there walking.
+        /// </summary>
+        protected Vector2 OpenHeading(Vector2 wanted, float lookAhead = OpenLookAhead)
+        {
+            if (wanted.sqrMagnitude < 0.0001f)
+                return Vector2.zero;
+            wanted.Normalize();
+
+            if (Nav.Grid == null)
+                return SteerAround(wanted, lookAhead);
+
+            for (int i = 0; i < OpenTurns.Length; i++)
+            {
+                Vector2 candidate = Rotate(wanted, OpenTurns[i]);
+                if (IsOpenAhead(candidate, lookAhead))
+                    return candidate;
+            }
+            return Vector2.zero;
+        }
+
+        /// <summary>
+        /// Whether the floor is open for <paramref name="distance"/> pixels this way. Asked of the nav
+        /// grid, the same map the routes use. Measured from a cell's length out, not from the body: a
+        /// body against a wall stands on a cell the grid calls blocked, and every direction would read
+        /// as closed, including the one leading away. True with no grid.
+        /// </summary>
+        protected bool IsOpenAhead(Vector2 direction, float distance)
+        {
+            NavGrid grid = Nav.Grid;
+            if (grid == null || direction.sqrMagnitude < 0.0001f)
+                return true;
+            direction.Normalize();
+            Vector2 here = Position;
+            float step = Mathf.Min(grid.CellSize, distance);
+            return grid.HasLineOfSight(here + direction * step, here + direction * distance);
+        }
+
+        /// <summary>The route this enemy is walking, under Shift+D: the same list it is following.</summary>
+        void DrawRoute(Vector2 goal)
+        {
+            Vector2 at = Position;
+            if (_route.Direct)
+            {
+                DebugDraw.Line(at, goal, RouteDirectColor, 1f);
+                return;
+            }
+
+            for (int i = _route.Waypoint; i < _route.Path.Count; i++)
+            {
+                Vector2 next = _route.Path[i];
+                DebugDraw.Line(at, next, RouteColor);
+                DebugDraw.Cross(next, 3f, RouteColor);
+                at = next;
+            }
+        }
+
+        static readonly Color RouteColor = new Color(0.35f, 0.85f, 1f, 1f);
+        static readonly Color RouteDirectColor = new Color(0.45f, 1f, 0.55f, 0.7f);
+
+        /// <summary>How far the fallback whiskers look, in pixels. About a body and a half.</summary>
         const float ChaseLookAhead = 24f;
 
-        PathFollower _route;
+        /// <summary>How far ahead a free direction has to stay free, in pixels. A tile and a half.</summary>
+        protected const float OpenLookAhead = 24f;
+
+        /// <summary>The turns tried, smallest first and alternating sides, so a free direction is the nearest one.</summary>
+        static readonly float[] OpenTurns = { 0f, 30f, -30f, 60f, -60f, 90f, -90f, 135f, -135f, 180f };
+
+        // Made with the body, not on first use: runtime code never allocates.
+        readonly PathFollower _route = new PathFollower();
 
         /// <summary>
         /// Moves straight at a world position, stopping once within stopDistance.
@@ -590,10 +686,10 @@ namespace TakoBoyStudios.TopDown2D
             Move(delta, speed);
         }
 
-        /// <summary>Moves directly away from the player.</summary>
+        /// <summary>Backs away from the player, turning off a wall rather than into it.</summary>
         protected void Flee(float speed)
         {
-            Move(-DirectionToPlayer, speed);
+            Move(OpenHeading(-DirectionToPlayer), speed);
         }
 
         /// <summary>

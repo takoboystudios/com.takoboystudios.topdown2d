@@ -12,6 +12,11 @@ namespace TakoBoyStudios.TopDown2D
     /// stale, when the destination has genuinely moved, or when it has run out, and walks the plan in
     /// between.
     ///
+    /// When the way is clear (a straight line with a cell to spare from every wall) it does not plan
+    /// at all and walks straight there, which is both cheaper and the honest reading of an open room.
+    /// When a body stops getting closer to its waypoint it plans again rather than pushing: something
+    /// the grid does not know about (another body, a corner the inflation shaved) is in the way.
+    ///
     /// The first repath is offset by a random slice of the interval so a room full of enemies does not
     /// search on the same frame. That is the difference between a steady cost and a stutter every time
     /// a wave lands.
@@ -27,23 +32,47 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>Seconds a plan is trusted for, even if nothing has moved.</summary>
         const float RepathInterval = 0.45f;
 
-        readonly List<Vector2> _path = new();
-        readonly Pathfinder _finder = new();
+        /// <summary>Seconds without getting a pixel closer to the waypoint before a body counts as caught.</summary>
+        const float StallTime = 0.35f;
+
+        /// <summary>
+        /// One search buffer for everybody. Searches run one at a time on the main thread and leave
+        /// their answer in the caller's own list, so sharing costs nothing and saves every enemy its
+        /// own grid-sized arrays. Sized when a room is built (Nav.Set).
+        /// </summary>
+        static readonly Pathfinder Shared = new();
+
+        readonly List<Vector2> _path = new(32);
 
         int _index;
         Vector2 _plannedFor;
         float _timer = -1f;
+        float _closest = float.MaxValue;
+        float _stall;
 
         /// <summary>The route as it stands, for the debug overlay.</summary>
         public IReadOnlyList<Vector2> Path => _path;
 
         public int Waypoint => _index;
 
+        /// <summary>True when the last heading was a straight walk because the way was clear.</summary>
+        public bool Direct { get; private set; }
+
+        /// <summary>Sizes the shared search buffers to a room's grid. Setup only.</summary>
+        public static void Prepare(NavGrid grid)
+        {
+            if (grid != null)
+                Shared.Prepare(grid);
+        }
+
         public void Clear()
         {
             _path.Clear();
             _index = 0;
             _timer = -1f;
+            _closest = float.MaxValue;
+            _stall = 0f;
+            Direct = false;
         }
 
         /// <summary>
@@ -59,9 +88,29 @@ namespace TakoBoyStudios.TopDown2D
         )
         {
             heading = Vector2.zero;
+            Direct = false;
 
             if (grid == null)
                 return false;
+
+            // A body pressed against a wall stands on a cell the inflated grid calls blocked, from
+            // which every line fails; ask from the nearest place it could stand instead.
+            Vector2 start = from;
+            if (!grid.IsWalkableAt(from) && grid.TryFindNearest(from, 2, out int sx, out int sy))
+                start = grid.CellToWorld(sx, sy);
+
+            if (grid.HasClearLine(start, goal, NavGrid.OneCellToSpare))
+            {
+                // The plan is dropped, so the moment the way closes it plans fresh from here.
+                if (_path.Count > 0)
+                    Clear();
+                Vector2 direct = goal - from;
+                if (direct.sqrMagnitude < 0.0001f)
+                    return false;
+                heading = direct.normalized;
+                Direct = true;
+                return true;
+            }
 
             // Staggered, so a crowd spawned on one frame does not then search on one frame forever.
             if (_timer < 0f)
@@ -78,8 +127,10 @@ namespace TakoBoyStudios.TopDown2D
                 _timer = RepathInterval;
                 _plannedFor = goal;
                 _index = 0;
+                _closest = float.MaxValue;
+                _stall = 0f;
 
-                if (!_finder.TryFindPath(grid, from, goal, _path))
+                if (!Shared.TryFindPath(grid, from, goal, _path))
                 {
                     _path.Clear();
                     return false;
@@ -89,7 +140,11 @@ namespace TakoBoyStudios.TopDown2D
             // Drop waypoints already reached. A loop rather than one step, because a fast body can
             // cross more than one in a frame and would otherwise walk back to pick them up.
             while (_index < _path.Count && Vector2.Distance(from, _path[_index]) <= ArriveRadius)
+            {
                 _index++;
+                _closest = float.MaxValue;
+                _stall = 0f;
+            }
 
             if (_index >= _path.Count)
             {
@@ -103,10 +158,24 @@ namespace TakoBoyStudios.TopDown2D
             }
 
             Vector2 toWaypoint = _path[_index] - from;
-            if (toWaypoint.sqrMagnitude < 0.0001f)
+            float distance = toWaypoint.magnitude;
+            if (distance < 0.0001f)
                 return false;
 
-            heading = toWaypoint.normalized;
+            // Caught on something: plan again next frame instead of pushing into it.
+            if (distance < _closest - 1f)
+            {
+                _closest = distance;
+                _stall = 0f;
+            }
+            else if ((_stall += deltaTime) >= StallTime)
+            {
+                _stall = 0f;
+                _closest = float.MaxValue;
+                _timer = 0f;
+            }
+
+            heading = toWaypoint / distance;
             return true;
         }
     }
@@ -136,7 +205,11 @@ namespace TakoBoyStudios.TopDown2D
         static readonly HashSet<Vector2Int> _cells = new();
         static int _tile = 16;
 
-        public static void Set(NavGrid grid) => Grid = grid;
+        public static void Set(NavGrid grid)
+        {
+            Grid = grid;
+            PathFollower.Prepare(grid);
+        }
 
         public static void SetPerches(List<Vector2> perches, int tileSize)
         {

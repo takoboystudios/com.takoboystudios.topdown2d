@@ -34,6 +34,16 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         const int MaxExpansions = 4000;
 
+        /// <summary>
+        /// The clearance a route would like, in cells: two is a tile, a body's width. A step into a
+        /// cell with less costs extra, so a route takes the middle of a corridor and goes round a pillar
+        /// with room to spare, but a gap narrower than that is still a way through when it is the only one.
+        /// </summary>
+        const int WantedClearance = 2;
+
+        /// <summary>Extra cost per cell of clearance short of what is wanted. An orthogonal step is 10.</summary>
+        const int NearWallPenalty = 8;
+
         NavGrid _grid;
         int[] _gScore;
         int[] _fScore;
@@ -130,7 +140,7 @@ namespace TakoBoyStudios.TopDown2D
                     if (_stamp[neighbour] == _generation && _closed[neighbour])
                         continue;
 
-                    int tentative = _gScore[current] + (diagonal ? Diagonal : Orthogonal);
+                    int tentative = _gScore[current] + (diagonal ? Diagonal : Orthogonal) + WallPenalty(grid, nx, ny);
 
                     bool seen = _stamp[neighbour] == _generation;
                     if (seen && tentative >= _gScore[neighbour])
@@ -149,7 +159,11 @@ namespace TakoBoyStudios.TopDown2D
             return false;
         }
 
-        void Prepare(NavGrid grid)
+        /// <summary>
+        /// Sizes the buffers to a grid. Done when a room is built (Nav.Set), so the first search in a
+        /// room allocates nothing; a search on a grid of another size prepares itself.
+        /// </summary>
+        public void Prepare(NavGrid grid)
         {
             if (_grid == grid && _gScore != null && _gScore.Length == grid.Count)
                 return;
@@ -208,6 +222,12 @@ namespace TakoBoyStudios.TopDown2D
             return cell;
         }
 
+        static int WallPenalty(NavGrid grid, int x, int y)
+        {
+            int clearance = grid.ClearanceOf(x, y);
+            return clearance >= WantedClearance ? 0 : (WantedClearance - clearance) * NearWallPenalty;
+        }
+
         /// <summary>Octile distance: exact for eight-way movement, so the search never wanders.</summary>
         static int Heuristic(int x, int y, int goalX, int goalY)
         {
@@ -248,7 +268,10 @@ namespace TakoBoyStudios.TopDown2D
                 bool last = i == path.Count - 1;
 
                 // Keep a point only when the one after it cannot be reached directly from the anchor.
-                if (!last && grid.HasLineOfSight(anchor, path[i + 1]))
+                // Directly means with a cell to spare from every wall: a shortcut that shaves a
+                // pillar's corner is exactly the line a body snags on, which is what undoes the
+                // search's own preference for room.
+                if (!last && grid.HasClearLine(anchor, path[i + 1], NavGrid.OneCellToSpare))
                     continue;
 
                 anchor = path[i];
