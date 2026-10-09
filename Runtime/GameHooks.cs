@@ -168,7 +168,7 @@ namespace TakoBoyStudios.TopDown2D
     /// What the players can see, in world units: the gameplay frame. The entity layer does not know
     /// what a camera is (T-409), so a screen-wide effect (the Brand's hit on everything on screen, the
     /// dimmed screen behind it) asks here and the game wires <see cref="Visible"/> to its own camera,
-    /// which in Hell Wilds is <c>CameraController</c> with the 256 x 144 frame. Unwired, it falls back to
+    /// which in Hell Wilds is <c>CameraController</c> with the 320 x 180 frame. Unwired, it falls back to
     /// the main camera's orthographic view.
     /// </summary>
     public static class ScreenView

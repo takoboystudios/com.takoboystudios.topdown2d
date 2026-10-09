@@ -623,17 +623,39 @@ namespace TakoBoyStudios.TopDown2D
         /// grid, the same map the routes use. Measured from a cell's length out, not from the body: a
         /// body against a wall stands on a cell the grid calls blocked, and every direction would read
         /// as closed, including the one leading away. True with no grid.
+        ///
+        /// While a fight has the screen locked, the edge of the screen is a wall too, and one the grid
+        /// cannot see because it moves with the camera. That is asked of the boundary's own colliders,
+        /// the ones the body will actually stop against, so a fleeing or backing-off enemy picks a way it
+        /// can go instead of walking its face into the edge of the screen (T-557). With no fight locked
+        /// the mask is zero and it costs nothing.
         /// </summary>
         protected bool IsOpenAhead(Vector2 direction, float distance)
         {
-            NavGrid grid = Nav.Grid;
-            if (grid == null || direction.sqrMagnitude < 0.0001f)
+            if (direction.sqrMagnitude < 0.0001f)
                 return true;
             direction.Normalize();
             Vector2 here = Position;
+
+            int frame = CombatRules.ContainmentMask();
+            if (frame != 0)
+            {
+                // A body starting inside the boundary (one still walking in) reads distance 0: not a wall.
+                RaycastHit2D edge = Physics2D.CircleCast(here, FrameProbeRadius, direction, distance, frame);
+                if (edge.collider != null && edge.distance > 0f)
+                    return false;
+            }
+
+            NavGrid grid = Nav.Grid;
+            if (grid == null)
+                return true;
             float step = Mathf.Min(grid.CellSize, distance);
             return grid.HasLineOfSight(here + direction * step, here + direction * distance);
         }
+
+        // Half a body: wide enough that a way clearing the boundary by a hair is not counted open, small
+        // enough that a body standing against the boundary can still walk along it.
+        const float FrameProbeRadius = 4f;
 
         /// <summary>The route this enemy is walking, under Shift+D: the same list it is following.</summary>
         void DrawRoute(Vector2 goal)
