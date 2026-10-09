@@ -46,8 +46,16 @@ namespace TakoBoyStudios.TopDown2D
         protected bool m_jumpPressed; // edge this frame
         protected bool m_jumpHeld; // held state
 
-        // Additive velocity from knockback, dashes and scripted pushes.
+        // Additive velocity from dashes, lunges and scripted pushes. Fades slowly (see PhysicsTick).
         protected Vector2 m_impulseVelocity;
+
+        // Additive velocity from being hit (T-555). Fades fast, over CombatRules.HitPushSettleTime, so a
+        // hit reads as a kick the body walks against rather than a slide.
+        protected Vector2 m_hitPush;
+
+        // However many hits land at once, a push never starts faster than this. Two and a half screens a
+        // second: far above any single hit, there only so a pile of blasts cannot fling a body across a room.
+        const float MaxHitPushSpeed = 800f;
 
         // A shove in progress (T-480): the velocity it started at and how long it has left. While it
         // runs it replaces the body's own movement, slowing linearly to a stop.
@@ -124,7 +132,9 @@ namespace TakoBoyStudios.TopDown2D
             }
             else
             {
-                desired = m_moveInput * m_moveSpeed + m_impulseVelocity;
+                desired = m_moveInput * m_moveSpeed + m_impulseVelocity + m_hitPush;
+                if (DebugDraw.Enabled && m_hitPush.sqrMagnitude > 0f)
+                    DebugDraw.Line(Position, Position + m_hitPush * 0.1f, new Color(1f, 0.9f, 0.2f, 1f));
             }
             bool jumpNow = m_jumpPressed;
             bool jumpHeld = m_jumpHeld;
@@ -155,6 +165,17 @@ namespace TakoBoyStudios.TopDown2D
                     m_impulseVelocity = Vector2.zero;
             }
 
+            // A hit's push dies away over the settle time whatever the body weighs: weight already
+            // decided how hard it started. Three time constants is about 95% gone, so the settle time
+            // reads as "how long the kick lasts".
+            if (m_hitPush.sqrMagnitude > 0f)
+            {
+                float settle = Mathf.Max(CombatRules.HitPushSettleTime, 0.01f);
+                m_hitPush *= Mathf.Exp(-3f * fdt / settle);
+                if (m_hitPush.sqrMagnitude < 1f)
+                    m_hitPush = Vector2.zero;
+            }
+
             // Update last move direction for facing and attacks.
             if (!m_ownsLastMoveDirection && m_moveInput.sqrMagnitude > 0.0001f)
                 m_lastMoveDirection = m_moveInput;
@@ -164,6 +185,7 @@ namespace TakoBoyStudios.TopDown2D
         {
             m_moveInput = Vector2.zero;
             m_impulseVelocity = Vector2.zero;
+            m_hitPush = Vector2.zero;
             _shoveRemaining = 0f;
         }
 
@@ -212,6 +234,7 @@ namespace TakoBoyStudios.TopDown2D
             _shoveRemaining = duration;
             _shoveTotal = duration;
             m_impulseVelocity = Vector2.zero;
+            m_hitPush = Vector2.zero;
         }
 
         public override void AddImpulse(Vector2 impulse)
@@ -219,6 +242,13 @@ namespace TakoBoyStudios.TopDown2D
             m_impulseVelocity += impulse;
             if (m_impulseVelocity.magnitude > m_maxImpulseSpeed)
                 m_impulseVelocity = m_impulseVelocity.normalized * m_maxImpulseSpeed;
+        }
+
+        public override void PushFromHit(Vector2 push)
+        {
+            m_hitPush += push;
+            if (m_hitPush.sqrMagnitude > MaxHitPushSpeed * MaxHitPushSpeed)
+                m_hitPush = m_hitPush.normalized * MaxHitPushSpeed;
         }
 
         // ----------------------------

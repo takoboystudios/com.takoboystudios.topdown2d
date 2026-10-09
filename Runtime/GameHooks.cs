@@ -130,6 +130,16 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public static System.Action<Status.StatusHolder> HeavyHitBreaks;
 
+        /// <summary>
+        /// How long the push from a hit takes to die away, in seconds. By then the body is back under
+        /// its own steering. Short is the point: a hit's push is a kick the body keeps walking against,
+        /// the way a tear pushes in Isaac, not a slide. The old shared impulse took most of a second
+        /// to fade and read as ice. The game sets this from its settings.
+        /// </summary>
+        public static float HitPushSettleTime = DefaultHitPushSettleTime;
+
+        public const float DefaultHitPushSettleTime = 0.2f;
+
         public static void BreakOnHeavyHit(Status.StatusHolder holder)
         {
             if (holder != null)
@@ -150,6 +160,7 @@ namespace TakoBoyStudios.TopDown2D
             ExtraContainmentMask = null;
             PlayerFrameMask = null;
             HeavyHitBreaks = null;
+            HitPushSettleTime = DefaultHitPushSettleTime;
         }
     }
 

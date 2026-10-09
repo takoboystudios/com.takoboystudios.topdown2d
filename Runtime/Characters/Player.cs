@@ -1235,6 +1235,13 @@ namespace TakoBoyStudios.TopDown2D
             return Mathf.Max(1, Mathf.RoundToInt(damage * (float)DamageValues.PlayerHealthPerPip / DamageValues.HitDamage));
         }
 
+        /// <summary>
+        /// The player keeps the older push model rather than the short kick enemies get (T-555). His hurt
+        /// reaction zeroes the impulse so a hit stops him dead, and a kick in its own channel would slide
+        /// him straight through that freeze.
+        /// </summary>
+        public override void PushFromHit(Vector2 push) => AddImpulse(push);
+
         public override void DealDamage(HitEvent hitEvent)
         {
             if (_invulnTimer > 0f || (m_fsm != null && m_fsm.CurrentState == (int)PlayerState.Damaged))

@@ -526,6 +526,15 @@ namespace TakoBoyStudios.TopDown2D
         public virtual void AddImpulse(Vector2 impulse) { }
 
         /// <summary>
+        /// The push a hit gives (T-555): a short kick that dies away over
+        /// <see cref="CombatRules.HitPushSettleTime"/>, added on top of the body's own movement so it
+        /// keeps walking against it. Never stops, cancels or resets anything. Kept apart from
+        /// <see cref="AddImpulse"/>, which dashes and lunges use and which fades far more slowly.
+        /// Nothing happens on a body that cannot move.
+        /// </summary>
+        public virtual void PushFromHit(Vector2 push) { }
+
+        /// <summary>
         /// A shove (T-480): carried <paramref name="distance"/> pixels along <paramref name="direction"/>
         /// over <paramref name="duration"/> seconds, taking over the body's own movement while it runs.
         /// No-op on a static Entity, which cannot be moved; real on PhysicsEntity.
@@ -699,7 +708,7 @@ namespace TakoBoyStudios.TopDown2D
             if (shoves)
                 Shove(info.knockbackDirection, info.values.shoveDistance, info.values.shoveTime);
             else
-                AddImpulse(knockback * KnockbackScale);
+                PushFromHit(knockback * KnockbackScale);
 
             // Forced movement from a hit is a Displacement, which is what Bleed pays off on and what
             // a displacement-triggered Perk fires from. Walking is not this, and neither is a dash:

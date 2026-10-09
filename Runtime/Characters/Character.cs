@@ -44,6 +44,7 @@ namespace TakoBoyStudios.TopDown2D
                 case Fsm.StateStep.Enter:
                     m_moveInput = Vector2.zero;
                     m_impulseVelocity = Vector2.zero;
+                    m_hitPush = Vector2.zero;
                     _deathPlaying = PlayDeath(GetAnimationFacingDirection());
                     break;
                 case Fsm.StateStep.Update:
