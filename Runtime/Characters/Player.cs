@@ -1240,6 +1240,10 @@ namespace TakoBoyStudios.TopDown2D
             if (_invulnTimer > 0f || (m_fsm != null && m_fsm.CurrentState == (int)PlayerState.Damaged))
                 return;
 
+            // A test switch, not a mechanic: the hit is ignored outright, so nothing reacts to it.
+            if (TestCheats.PlayersInvincible)
+                return;
+
             int healthBefore = Health;
 
             // Recorded before the base call: a fatal hit calls Die() inside it, which raises OnDeath

@@ -220,7 +220,8 @@ namespace TakoBoyStudios.TopDown2D
             // internal timer it uses. It simply waits. This is the whole of the V1 gating: it is a
             // clean stop rather than a half-active enemy, and it costs the hand-authored enemy classes
             // nothing.
-            if (!InCombat)
+            // A test switch holds every enemy the same way, so a formation can be looked at as built.
+            if (!InCombat || TestCheats.EnemiesPaused)
             {
                 UpdateOutOfCombat(deltaTime);
                 return true;

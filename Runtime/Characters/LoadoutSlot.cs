@@ -72,10 +72,13 @@ namespace TakoBoyStudios.TopDown2D
             Equip(options[(IndexOf(_equipped) + 1) % count]);
         }
 
-        /// <summary>Spends one use. Does nothing to an ability that never runs out, or one already at zero.</summary>
+        /// <summary>
+        /// Spends one use. Does nothing to an ability that never runs out, or one already at zero, or
+        /// while <see cref="TestCheats.InfiniteUses"/> is on.
+        /// </summary>
         public void Spend()
         {
-            if (_uses > 0)
+            if (_uses > 0 && !TestCheats.InfiniteUses)
                 _uses--;
         }
 
