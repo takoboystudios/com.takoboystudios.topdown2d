@@ -50,13 +50,17 @@ namespace TakoBoyStudios.TopDown2D
         [Header("Range")]
         [SerializeField, Min(0f)]
         [Tooltip(
-            "How far the shot travels before it gives out, in pixels. 0 means it flies until it "
-                + "leaves the screen, which is what enemy fire wants. For the player it is the dial "
-                + "that stops a fight being won from across the room: the encounter frame is 256 wide "
-                + "and 144 tall, so a range under about 128 means you have to close on something to "
-                + "kill it. Needs playing, not reasoning about."
+            "How far the shot travels before it gives out, in pixels, before the shooter's Range stat "
+                + "(Perks and Relics) scales it. 0 means it flies until it leaves the screen, which is "
+                + "what enemy fire wants. For the player it is the dial that stops a fight being won from "
+                + "across the room: the frame is 320 wide and 180 tall, so a range under about 160 means "
+                + "you have to close on something to kill it. Needs playing, not reasoning about."
         )]
         float maxRange;
+
+        // This shot's range after the Range stat, worked out on its first frame of flight: the gun sets
+        // who fired it after Shoot, and a fresh value each shot means an upgrade lands on the next one.
+        float _range = -1f;
 
         public Transform Target { get; private set; }
         Vector2 _direction;
@@ -186,6 +190,7 @@ namespace TakoBoyStudios.TopDown2D
             Target = target;
             _spawnGracePeriod = 0.1f; // 100ms grace period to avoid hitting owner
             _travelled = 0f;
+            _range = -1f;
             if (rotateArtToDirection && character != null)
             {
                 float heading = Mathf.Atan2(_direction.y, _direction.x) * Mathf.Rad2Deg;
@@ -290,8 +295,10 @@ namespace TakoBoyStudios.TopDown2D
                     // rewarded for taking a longer one.
                     if (maxRange > 0f)
                     {
+                        if (_range < 0f)
+                            _range = RunStats.ShotRangeFor(this, maxRange);
                         _travelled += Velocity.magnitude * deltaTime;
-                        if (_travelled >= maxRange)
+                        if (_travelled >= _range)
                         {
                             m_fsm.ChangeState((int)EntityState.Dead);
                             break;

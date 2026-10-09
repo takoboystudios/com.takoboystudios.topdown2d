@@ -47,17 +47,28 @@ namespace TakoBoyStudios.TopDown2D
         /// <summary>Given an entity and its base move speed, the speed it actually moves at.</summary>
         public static Func<Entity, float, float> MoveSpeed;
 
+        /// <summary>
+        /// Given a shot and its base range, how far it actually flies: the shooter's Range stat. The
+        /// shot is passed rather than the shooter so the game can follow it back to whoever is
+        /// responsible, as it does for damage.
+        /// </summary>
+        public static Func<Entity, float, float> ShotRange;
+
         public static float OutgoingDamageFor(Entity entity, float baseDamage) =>
             entity != null && OutgoingDamage != null ? OutgoingDamage(entity, baseDamage) : baseDamage;
 
         public static float MoveSpeedFor(Entity entity, float baseSpeed) =>
             entity != null && MoveSpeed != null ? MoveSpeed(entity, baseSpeed) : baseSpeed;
 
+        public static float ShotRangeFor(Entity shot, float baseRange) =>
+            shot != null && ShotRange != null ? ShotRange(shot, baseRange) : baseRange;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void Clear()
         {
             OutgoingDamage = null;
             MoveSpeed = null;
+            ShotRange = null;
         }
     }
 
