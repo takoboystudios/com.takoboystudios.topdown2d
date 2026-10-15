@@ -62,6 +62,11 @@ namespace TakoBoyStudios.TopDown2D
         // MaxClearance. Zero for a blocked cell. Built once with the grid.
         byte[] _clearance;
 
+        // Cells shut for a while by something that comes and goes during a fight (HellWilds HW-113: a
+        // hole blown in the floor), counted so two things shutting one cell must both open it again.
+        // Made with the grid; never allocated after.
+        byte[] _closed;
+
         public int Count => Width * Height;
 
         /// <summary>How many cells can be stood in. For the tests and the debug readout.</summary>
@@ -99,6 +104,7 @@ namespace TakoBoyStudios.TopDown2D
             grid.Width = Mathf.Max(1, Mathf.CeilToInt(bounds.width / grid.CellSize));
             grid.Height = Mathf.Max(1, Mathf.CeilToInt(bounds.height / grid.CellSize));
             grid._walkable = new bool[grid.Width * grid.Height];
+            grid._closed = new byte[grid.Width * grid.Height];
 
             for (int y = 0; y < grid.Height; y++)
             {
@@ -225,7 +231,44 @@ namespace TakoBoyStudios.TopDown2D
             TryWorldToCell(world, out int x, out int y) && IsWalkable(x, y);
 
         public bool IsWalkable(int x, int y) =>
-            x >= 0 && y >= 0 && x < Width && y < Height && _walkable[y * Width + x];
+            x >= 0 && y >= 0 && x < Width && y < Height && _walkable[y * Width + x] && _closed[y * Width + x] == 0;
+
+        /// <summary>
+        /// Shuts every cell whose centre <paramref name="rect"/> covers, grown by the agent's radius
+        /// the way a built-in blocker is, until <see cref="Reopen"/> is called with the same rectangle.
+        /// For something that comes and goes during a fight, like a hole blown in the floor: routes go
+        /// round it while it is there. Clearance is not worked out again, so a route may pass a little
+        /// closer to a shut cell than it would to a wall. Allocates nothing.
+        /// </summary>
+        public void Close(Rect rect, float agentRadius = DefaultAgentRadius) => MarkClosed(Grow(rect, agentRadius), 1);
+
+        /// <summary>Undoes one <see cref="Close"/> of the same rectangle. A cell opens when every close of it has been undone.</summary>
+        public void Reopen(Rect rect, float agentRadius = DefaultAgentRadius) => MarkClosed(Grow(rect, agentRadius), -1);
+
+        /// <summary>Whether something has shut this cell for now, as opposed to it being built solid. For the tests and the overlay.</summary>
+        public bool IsClosed(int x, int y) =>
+            x >= 0 && y >= 0 && x < Width && y < Height && _closed[y * Width + x] > 0;
+
+        void MarkClosed(Rect rect, int by)
+        {
+            int minX = Mathf.Max(0, Mathf.FloorToInt((rect.xMin - Origin.x) / CellSize));
+            int maxX = Mathf.Min(Width - 1, Mathf.CeilToInt((rect.xMax - Origin.x) / CellSize));
+            int minY = Mathf.Max(0, Mathf.FloorToInt((rect.yMin - Origin.y) / CellSize));
+            int maxY = Mathf.Min(Height - 1, Mathf.CeilToInt((rect.yMax - Origin.y) / CellSize));
+
+            for (int y = minY; y <= maxY; y++)
+            {
+                for (int x = minX; x <= maxX; x++)
+                {
+                    // The same centre test BlockRect uses, so a close and its reopen always touch the
+                    // same cells.
+                    if (!rect.Contains(CellToWorld(x, y)))
+                        continue;
+                    int i = y * Width + x;
+                    _closed[i] = (byte)Mathf.Clamp(_closed[i] + by, 0, 255);
+                }
+            }
+        }
 
         /// <summary>The middle of a cell, which is where a path puts an agent.</summary>
         public Vector2 CellToWorld(int x, int y) =>
