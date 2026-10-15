@@ -25,6 +25,17 @@ namespace TakoBoyStudios.TopDown2D
         public const int Ground = 1;
 
         /// <summary>
+        /// Where shadows sit inside a tier: under every body on that floor, over its floor art. The
+        /// reference keeps shadows in a band of their own for exactly this reason: a shadow lies on
+        /// the floor, so it can never draw over anyone standing on that floor. Bodies sort at minus
+        /// ten times their ground y, so this holds for anything within 490 world units of the origin.
+        /// </summary>
+        public const int ShadowOrder = -4900;
+
+        /// <summary>The sort order of a shadow on a floor: the tier's shadow band.</summary>
+        public static int ShadowOrderFor(int floor) => OrderOffset(floor) + ShadowOrder;
+
+        /// <summary>
         /// Which draw tier a floor is in: 0 and 1 are tier 1, 2 and 3 tier 2, 4 and 5 tier 3, -3 to -1
         /// tier 0. Integer division truncating toward zero, exactly the reference's rule.
         /// </summary>

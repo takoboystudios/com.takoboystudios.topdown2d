@@ -169,6 +169,8 @@ namespace TakoBoyStudios.TopDown2D
             }
             if (_floorSorter != null)
                 _floorSorter.TierOffset = FloorTiers.OrderOffset(m_floor);
+            if (_shadowGroup != null)
+                _shadowGroup.sortingOrder = FloorTiers.ShadowOrderFor(m_floor);
         }
 
         public Vector2 FacingDirection
@@ -224,6 +226,38 @@ namespace TakoBoyStudios.TopDown2D
         {
             if (!m_rb)
                 m_rb = GetComponent<Rigidbody2D>();
+
+            SetUpShadowSorting();
+        }
+
+        UnityEngine.Rendering.SortingGroup _shadowGroup;
+
+        /// <summary>
+        /// A shadow lies on the floor, under everyone standing on it (the reference's rule, HellWilds
+        /// #355). As a child of the body's SortingGroup it sorted with the body's ground y, so a body
+        /// a pixel south of someone drew its shadow over them: a Perk bubble's shadow over Grim. It now
+        /// has a SortingGroup of its own that sorts at the root, in its floor's shadow band
+        /// (FloorTiers.ShadowOrderFor), whatever its owner's order. Nothing is reparented.
+        ///
+        /// Awake, so it is built once when the pool makes the body (setup), and only in play mode,
+        /// because Entity also runs in the editor and must not dirty a scene or a prefab.
+        /// </summary>
+        void SetUpShadowSorting()
+        {
+            if (!Application.isPlaying)
+                return;
+
+            Transform shadow = m_shadowAnimator != null ? m_shadowAnimator.transform : transform.Find("Shadow");
+            if (shadow == null)
+                return;
+
+            _shadowGroup = shadow.GetComponent<UnityEngine.Rendering.SortingGroup>();
+            if (_shadowGroup == null)
+                _shadowGroup = shadow.gameObject.AddComponent<UnityEngine.Rendering.SortingGroup>();
+
+            _shadowGroup.sortAtRoot = true;
+            _shadowGroup.sortingLayerName = "Default";
+            _shadowGroup.sortingOrder = FloorTiers.ShadowOrderFor(m_floor);
         }
 
         protected virtual void Start()
