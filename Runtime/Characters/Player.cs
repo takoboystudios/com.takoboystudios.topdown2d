@@ -1124,7 +1124,17 @@ namespace TakoBoyStudios.TopDown2D
         /// <paramref name="arcHeight"/> high, ignoring walls on the way. The game has already found a
         /// spot the body fits. Returns false when the player is not free to go.
         /// </summary>
-        public bool BeginHop(Vector2 to, float seconds, float arcHeight)
+        public bool BeginHop(Vector2 to, float seconds, float arcHeight) =>
+            BeginHop(to, seconds, arcHeight, seconds, 0f);
+
+        /// <summary>
+        /// Hops down a ledge the reference's way: the body slides from here to <paramref name="to"/>
+        /// over <paramref name="seconds"/> while it flies an arc <paramref name="arcHeight"/> high that
+        /// takes <paramref name="arcSeconds"/>, floating <paramref name="hang"/> seconds at the top. An
+        /// arc shorter than the slide lands first and the slide finishes on the ground, as the
+        /// reference's does. Returns false when the player is not free to go.
+        /// </summary>
+        public bool BeginHop(Vector2 to, float seconds, float arcHeight, float arcSeconds, float hang)
         {
             if (!CanTakeTerrainMove || seconds <= 0f)
                 return false;
@@ -1133,9 +1143,14 @@ namespace TakoBoyStudios.TopDown2D
             _hopTo = to;
             _hopTime = seconds;
             _hopArc = Mathf.Max(0f, arcHeight);
+            _hopArcTime = Mathf.Clamp(arcSeconds, 0.01f, seconds);
+            _hopHang = Mathf.Clamp(hang, 0f, seconds - _hopArcTime);
             m_fsm.ChangeState((int)PlayerState.Hop);
             return true;
         }
+
+        float _hopArcTime;
+        float _hopHang;
 
         /// <summary>
         /// Goes into a pit: out of sight for <paramref name="seconds"/>, then back at
@@ -1168,7 +1183,7 @@ namespace TakoBoyStudios.TopDown2D
                     // Walls are ignored on the way down: the ledge itself is one.
                     StartFlying();
                     if (motor != null)
-                        motor.LaunchArc(_hopArc, _hopTime);
+                        motor.LaunchArc(_hopArc, _hopArcTime + _hopHang, _hopHang);
 
                     Vector2 way = _hopTo - _hopFrom;
                     PlayJumpVisual(way.sqrMagnitude > 0.001f ? way.normalized : Vector2.down);
