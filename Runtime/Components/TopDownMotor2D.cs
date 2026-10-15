@@ -184,13 +184,35 @@ namespace TakoBoyStudios.TopDown2D
         static int GroundEdgeMask =>
             _groundEdgeMask != -1 ? _groundEdgeMask : _groundEdgeMask = LayerMask.GetMask("GroundEdge");
 
+        /// <summary>
+        /// Hop walls (HellWilds, after the reference): low walls a body on the ground cannot cross and a
+        /// body in the air passes straight over. Logs, pipes, rails. There is no height test beyond
+        /// being off the ground at all: <see cref="HopWallClearance"/> is the reference's 0.1 px.
+        /// </summary>
+        static int _hopWallMask = -1;
+        public static int HopWallMask =>
+            _hopWallMask != -1 ? _hopWallMask : _hopWallMask = LayerMask.GetMask("HopWall");
+
+        /// <summary>Height, in pixels, at or above which a hop wall is nothing to a body. The reference's.</summary>
+        public const float HopWallClearance = 0.1f;
+
+        /// <summary>
+        /// Set while something is carrying this body off the top of a hop wall it landed on, so the
+        /// wall it is standing in does not hold it there. Set by the game, which runs the slide.
+        /// </summary>
+        public bool HopWallsSoft { get; set; }
+
+        /// <summary>Whether hop walls stop this body right now: it walks into walls, is on the ground, and is not being slid off one.</summary>
+        bool HeldByHopWalls => collisionMask != 0 && _height < HopWallClearance && !HopWallsSoft;
+
         int EffectiveCollisionMask =>
             (containedByCombatBoundary
                 ? CombatRules.WallsForFloor(Floor, collisionMask) | (CombatRules.ContainmentMask() & ~_excusedMask)
                 : CombatRules.WallsForFloor(Floor, collisionMask))
             | (ContainedByPlayerFrame ? CombatRules.FrameMask() : 0)
             | (collisionMask == 0 ? 0 : BreakableMask)
-            | (HeldByGroundEdges && _isGrounded && collisionMask != 0 ? GroundEdgeMask : 0);
+            | (HeldByGroundEdges && _isGrounded && collisionMask != 0 ? GroundEdgeMask : 0)
+            | (HeldByHopWalls ? HopWallMask : 0);
         #endregion
 
         #region Runtime (read-only)

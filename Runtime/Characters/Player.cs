@@ -779,9 +779,23 @@ namespace TakoBoyStudios.TopDown2D
 
             if (_jumpAction != null && _jumpAction.WasPressedThisFrame())
                 _jumpBufferTimer = jumpBuffer;
-            else if (_jumpBufferTimer > 0f)
+            else if (_jumpBufferTimer > 0f && !JumpHeld)
                 _jumpBufferTimer -= deltaTime;
         }
+
+        /// <summary>
+        /// Holds the jump: it cannot start, and a press made meanwhile is kept and fires the moment
+        /// this goes false. Set by the game while it slides the player off a hop wall, after the
+        /// reference, where a jump pressed during the slide goes off as soon as she is clear.
+        /// </summary>
+        public bool JumpHeld { get; set; }
+
+        /// <summary>
+        /// A direction the stick cannot push toward: the part of the input pointing this way is taken
+        /// off before the walk sees it. Zero for none. Set by the game while it slides the player off a
+        /// hop wall, so pushing back onto the wall does nothing (the reference's rule).
+        /// </summary>
+        public Vector2 InputBlockedToward { get; set; }
 
         // Containment used to be a position clamp against the active CamLock's screen rect. It is now
         // physical: a CamLock raises CombatBoundary colliders flush with the visible edges and the
@@ -1656,6 +1670,14 @@ namespace TakoBoyStudios.TopDown2D
             if (eightWayMovement)
                 input = SnapWalkToEight(input);
 
+            // A push the game has ruled out, such as back onto a hop wall being slid off.
+            if (InputBlockedToward != Vector2.zero)
+            {
+                float toward = Vector2.Dot(input, InputBlockedToward);
+                if (toward > 0f)
+                    input -= InputBlockedToward * toward;
+            }
+
             // Facing follows the stick the frame it moves, whatever the walk itself is doing, except
             // while the release grace is holding a diagonal whose keys are letting go (T-468). The walk
             // below still gets the real input either way: only the facing waits.
@@ -1944,7 +1966,7 @@ namespace TakoBoyStudios.TopDown2D
         {
             // Only from grounded Idle (this runs in StateIdle). The buffer lets a press made in the air
             // fire the instant the player lands.
-            if (_jumpBufferTimer > 0f && Grounded)
+            if (_jumpBufferTimer > 0f && Grounded && !JumpHeld)
                 m_fsm.ChangeState((int)PlayerState.Jump);
         }
 

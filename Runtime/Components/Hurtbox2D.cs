@@ -76,7 +76,15 @@ namespace TakoBoyStudios.TopDown2D
         /// shots inside the fight without every projectile prefab needing to know the layer exists.
         /// </summary>
         int EffectiveWallLayers =>
-            CombatRules.WallsForFloor(Owner != null ? Owner.Floor : FloorTiers.Ground, wallLayers) | CombatRules.ContainmentMask();
+            CombatRules.WallsForFloor(Owner != null ? Owner.Floor : FloorTiers.Ground, wallLayers)
+            | CombatRules.ContainmentMask()
+            | (StopsAtHopWalls ? TopDownMotor2D.HopWallMask : 0);
+
+        /// <summary>
+        /// A shot travelling at ground height stops at a hop wall; one launched or lobbed above it
+        /// passes over (the reference's rule). Only shots: a swing is not stopped by a log.
+        /// </summary>
+        bool StopsAtHopWalls => Owner is Projectile && Owner.Z < TopDownMotor2D.HopWallClearance;
 
         [BoxGroup("Behavior")]
         [Tooltip("Special behaviors for this hurtbox")]
