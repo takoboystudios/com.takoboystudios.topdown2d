@@ -53,7 +53,7 @@ namespace TakoBoyStudios.TopDown2D
             "How far the shot travels before it gives out, in pixels, before the shooter's Range stat "
                 + "(Perks and Relics) scales it. 0 means it flies until it leaves the screen, which is "
                 + "what enemy fire wants. For the player it is the dial that stops a fight being won from "
-                + "across the room: the frame is 384 wide and 216 tall, so a range under about 190 means "
+                + "across the room: the frame is 256 wide and 144 tall, so a range under about 128 means "
                 + "you have to close on something to kill it. Needs playing, not reasoning about."
         )]
         float maxRange;

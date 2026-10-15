@@ -693,7 +693,7 @@ namespace TakoBoyStudios.TopDown2D
 
         /// <summary>
         /// Moves straight at a world position, stopping once within stopDistance.
-        /// Distances are in pixels: the project runs at 1 unit per pixel, arena 384x216.
+        /// Distances are in pixels: the project runs at 1 unit per pixel, arena 256x144.
         /// </summary>
         protected void MoveToward(Vector2 position, float speed, float stopDistance = 2f)
         {

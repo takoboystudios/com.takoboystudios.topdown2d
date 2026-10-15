@@ -33,7 +33,7 @@ namespace TakoBoyStudios.TopDown2D
     {
         #region Inspector
 
-        // World scale is 1 unit per pixel. The arena is 384x216.
+        // World scale is 1 unit per pixel. The arena is 256x144.
 
         [BoxGroup("Arc")]
         [Tooltip("How high the throw peaks, in pixels. 0 drops it straight down with no arc, which is what a bird flying overhead wants.")]
