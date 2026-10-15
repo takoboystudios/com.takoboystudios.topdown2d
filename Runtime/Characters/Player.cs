@@ -21,6 +21,12 @@ namespace TakoBoyStudios.TopDown2D
 
         /// <summary>The Brand: the special. The world is frozen for most of it. See StateBrand.</summary>
         Brand,
+
+        /// <summary>Hopping down off a ledge (HellWilds #354): carried to a spot over a short arc, walls ignored.</summary>
+        Hop,
+
+        /// <summary>Gone into a pit (HellWilds #354): out of sight for a moment, then back on safe ground, hurt.</summary>
+        Fall,
     }
 
     /// <summary>
@@ -586,6 +592,9 @@ namespace TakoBoyStudios.TopDown2D
             if (motor != null)
                 motor.ContainedByPlayerFrame = true;
 
+                // A pit's edge holds a player standing on the floor (HellWilds #354, T-535).
+                motor.HeldByGroundEdges = true;
+
             // The facing is decided here, from the stick, with the release grace below. Left to the
             // physics tick it would be overwritten with the bending walk direction during the brake.
             m_ownsLastMoveDirection = true;
@@ -602,6 +611,8 @@ namespace TakoBoyStudios.TopDown2D
             m_fsm.AddState(StateReviving);
             m_fsm.AddState(StateKnuckle);
             m_fsm.AddState(StateBrand);
+            m_fsm.AddState(StateHop);
+            m_fsm.AddState(StateFall);
         }
 
         /// <summary>Pre-warms everything a Grip ability spawns. Fixed size, so a use never allocates. Setup only.</summary>
@@ -740,6 +751,14 @@ namespace TakoBoyStudios.TopDown2D
             // Invincibility and its blink run independently of the FSM so they carry past the freeze into
             // the free-moving recovery.
             UpdateInvulnerability(deltaTime);
+
+            // A pit's cost lands once the fall has handed back to Idle (#354).
+            if (_pendingFallDamage > 0 && !IsOnTerrainMove)
+            {
+                int damage = _pendingFallDamage;
+                _pendingFallDamage = 0;
+                TakeFallDamage(damage);
+            }
 
             if (!base.Tick(deltaTime))
                 return false;
@@ -1049,6 +1068,191 @@ namespace TakoBoyStudios.TopDown2D
             HandleBrandInput();
         }
 
+        #region Terrain moves
+
+        // Ledges and pits (HellWilds #354). The game decides when one happens (it knows the room's
+        // terrain); the player only knows how to be carried down a ledge and how to go into a pit.
+
+        Vector2 _hopFrom;
+        Vector2 _hopTo;
+        float _hopTime;
+        float _hopElapsed;
+        float _hopArc;
+
+        Vector2 _fallReturnTo;
+        int _fallDamage;
+        float _fallTime;
+        float _fallElapsed;
+
+        /// <summary>What the move stick is pushing, raw, or zero while input is locked.</summary>
+        public Vector2 StickInput =>
+            InputLocked || _moveAction == null ? Vector2.zero : _moveAction.ReadValue<Vector2>();
+
+        /// <summary>
+        /// True when the player is on the floor and free, which is the only time a ledge or a pit can
+        /// take them: standing or walking, not jumping, hurt, dead or busy with an ability.
+        /// </summary>
+        public bool CanTakeTerrainMove =>
+            !IsDead
+            && !InputLocked
+            && Grounded
+            && !IsWalkingIn
+            && m_fsm != null
+            && m_fsm.CurrentState == (int)EntityState.Idle;
+
+        /// <summary>True while hopping down a ledge or falling into a pit.</summary>
+        public bool IsOnTerrainMove =>
+            m_fsm != null
+            && (m_fsm.CurrentState == (int)PlayerState.Hop || m_fsm.CurrentState == (int)PlayerState.Fall);
+
+        /// <summary>
+        /// Hops down a ledge to <paramref name="to"/> over <paramref name="seconds"/>, drawn on an arc
+        /// <paramref name="arcHeight"/> high, ignoring walls on the way. The game has already found a
+        /// spot the body fits. Returns false when the player is not free to go.
+        /// </summary>
+        public bool BeginHop(Vector2 to, float seconds, float arcHeight)
+        {
+            if (!CanTakeTerrainMove || seconds <= 0f)
+                return false;
+
+            _hopFrom = Position;
+            _hopTo = to;
+            _hopTime = seconds;
+            _hopArc = Mathf.Max(0f, arcHeight);
+            m_fsm.ChangeState((int)PlayerState.Hop);
+            return true;
+        }
+
+        /// <summary>
+        /// Goes into a pit: out of sight for <paramref name="seconds"/>, then back at
+        /// <paramref name="returnTo"/> (the last safe ground the game saw), taking
+        /// <paramref name="damage"/> the way a hit would. Returns false when the player is not free to go.
+        /// A jump that lands over a pit comes here too, so a grounded player is all it needs.
+        /// </summary>
+        public bool BeginPitFall(Vector2 returnTo, int damage, float seconds)
+        {
+            if (IsDead || !Grounded || IsOnTerrainMove || m_fsm == null)
+                return false;
+
+            _fallReturnTo = returnTo;
+            _fallDamage = damage;
+            _fallTime = Mathf.Max(0.05f, seconds);
+            m_fsm.ChangeState((int)PlayerState.Fall);
+            return true;
+        }
+
+        void StateHop(Fsm.StateStep step, float deltaTime)
+        {
+            switch (step)
+            {
+                case Fsm.StateStep.Enter:
+                    _hopElapsed = 0f;
+                    ResetWalk();
+                    SetMoveDirection(Vector2.zero);
+                    m_impulseVelocity = Vector2.zero;
+
+                    // Walls are ignored on the way down: the ledge itself is one.
+                    StartFlying();
+                    if (motor != null)
+                        motor.LaunchArc(_hopArc, _hopTime);
+
+                    Vector2 way = _hopTo - _hopFrom;
+                    PlayJumpVisual(way.sqrMagnitude > 0.001f ? way.normalized : Vector2.down);
+                    break;
+
+                case Fsm.StateStep.Update:
+                    _hopElapsed += deltaTime;
+                    float t = Mathf.Clamp01(_hopElapsed / _hopTime);
+                    Position = Vector2.Lerp(_hopFrom, _hopTo, t);
+                    SetMoveDirection(Vector2.zero);
+
+                    if (DebugDraw.Enabled)
+                        DebugDraw.Line(_hopFrom, _hopTo, new Color(0.5f, 1f, 0.5f, 1f));
+
+                    if (t >= 1f)
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                    break;
+
+                case Fsm.StateStep.Exit:
+                    Position = _hopTo;
+                    StopFlying();
+                    if (motor != null)
+                        motor.ResetVertical();
+                    break;
+            }
+        }
+
+        void StateFall(Fsm.StateStep step, float deltaTime)
+        {
+            switch (step)
+            {
+                case Fsm.StateStep.Enter:
+                    _fallElapsed = 0f;
+                    ResetWalk();
+                    SetMoveDirection(Vector2.zero);
+                    m_impulseVelocity = Vector2.zero;
+
+                    // No fall art yet: the body simply drops from view, and its shadow with it.
+                    ShowBody(false);
+                    if (m_shadowAnimator != null)
+                        m_shadowAnimator.gameObject.SetActive(false);
+                    break;
+
+                case Fsm.StateStep.Update:
+                    SetMoveDirection(Vector2.zero);
+                    _fallElapsed += deltaTime;
+                    if (_fallElapsed >= _fallTime)
+                        m_fsm.ChangeState((int)EntityState.Idle);
+                    break;
+
+                case Fsm.StateStep.Exit:
+                    Position = _fallReturnTo;
+                    if (motor != null)
+                        motor.ResetVertical();
+                    ShowBody(true);
+                    if (m_shadowAnimator != null && m_shadowSize != ShadowSize.Off)
+                        m_shadowAnimator.gameObject.SetActive(true);
+
+                    // After the state change has gone through, so the hurt reaction it starts is not
+                    // replaced by the Idle this exit is heading for.
+                    _pendingFallDamage = _fallDamage;
+                    break;
+            }
+        }
+
+        int _pendingFallDamage;
+
+        /// <summary>
+        /// Health lost to a pit (#354): taken without a hit behind it, so no on-hit Perk fires and
+        /// nothing is credited, and reacted to the way a hit is, with the hurt freeze and the blinking
+        /// recovery, or death.
+        /// </summary>
+        public void TakeFallDamage(int damage)
+        {
+            if (damage <= 0 || IsDead || TestCheats.PlayersInvincible)
+                return;
+
+            int before = Health;
+            m_hp = Mathf.Max(0, m_hp - ScaleIncomingDamage(damage));
+            if (Health < before)
+                EntityEvents.ReportPlayerDamaged(this);
+
+            if (m_hp <= 0)
+            {
+                Die();
+                return;
+            }
+
+            StopHitLag();
+            SetInvulnerable(true);
+            _invulnTimer = damagedDuration + invulnDuration;
+            _blinkTimer = 0f;
+            _blinkVisible = true;
+            m_fsm.ChangeState((int)PlayerState.Damaged);
+        }
+
+        #endregion
+
         #region Scripted walk
 
         Vector2 _scriptedDirection;
@@ -1254,6 +1458,11 @@ namespace TakoBoyStudios.TopDown2D
         public override void DealDamage(HitEvent hitEvent)
         {
             if (_invulnTimer > 0f || (m_fsm != null && m_fsm.CurrentState == (int)PlayerState.Damaged))
+                return;
+
+            // A hop or a fall is carried, not played, and a hurt reaction in the middle of one would
+            // leave the body flying with no walls; both are short, so they are simply untouchable.
+            if (IsOnTerrainMove)
                 return;
 
             // A test switch, not a mechanic: the hit is ignored outright, so nothing reacts to it.
@@ -1762,6 +1971,8 @@ namespace TakoBoyStudios.TopDown2D
                 || m_fsm.CurrentState == (int)PlayerState.Knuckle
                 || m_fsm.CurrentState == (int)PlayerState.Brand
                 || m_fsm.CurrentState == (int)PlayerState.Reviving
+                || m_fsm.CurrentState == (int)PlayerState.Hop
+                || m_fsm.CurrentState == (int)PlayerState.Fall
                 || IsDead)
             {
                 return;

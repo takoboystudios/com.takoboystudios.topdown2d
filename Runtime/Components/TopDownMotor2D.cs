@@ -169,12 +169,25 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public bool ContainedByPlayerFrame { get; set; }
 
+        /// <summary>
+        /// Whether ground edges stop this body: colliders on the GroundEdge layer, which are walls to
+        /// a body standing on the floor and nothing to one in the air (HellWilds #354). A pit's edge is
+        /// one: walking into it stops a player, knockback cannot push them over it, and a jump goes
+        /// straight across. Set by <see cref="Player"/> on itself, like the co-op frame.
+        /// </summary>
+        public bool HeldByGroundEdges { get; set; }
+
+        static int _groundEdgeMask = -1;
+        static int GroundEdgeMask =>
+            _groundEdgeMask != -1 ? _groundEdgeMask : _groundEdgeMask = LayerMask.GetMask("GroundEdge");
+
         int EffectiveCollisionMask =>
             (containedByCombatBoundary
                 ? collisionMask | (CombatRules.ContainmentMask() & ~_excusedMask)
                 : (int)collisionMask)
             | (ContainedByPlayerFrame ? CombatRules.FrameMask() : 0)
-            | (collisionMask == 0 ? 0 : BreakableMask);
+            | (collisionMask == 0 ? 0 : BreakableMask)
+            | (HeldByGroundEdges && _isGrounded && collisionMask != 0 ? GroundEdgeMask : 0);
         #endregion
 
         #region Runtime (read-only)
