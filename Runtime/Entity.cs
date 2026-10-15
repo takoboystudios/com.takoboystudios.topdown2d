@@ -137,6 +137,40 @@ namespace TakoBoyStudios.TopDown2D
             }
         }
 
+        int m_floor = FloorTiers.Ground;
+        IsometricGroupSorter2D _floorSorter;
+        bool _floorSorterLooked;
+
+        /// <summary>
+        /// Which floor this body is on (HellWilds #355): 1 the ground, 3 one storey up, 2 the stairs
+        /// between. It decides which walls the body meets, which attacks reach it (within one floor),
+        /// and which draw tier it sorts in. A one-floor room leaves everything on 1, where nothing
+        /// changes.
+        /// </summary>
+        public int Floor
+        {
+            get => m_floor;
+            set
+            {
+                if (m_floor == value)
+                    return;
+                m_floor = value;
+                OnFloorChanged();
+            }
+        }
+
+        /// <summary>A floor change: the draw tier follows. A body that moves also tells its motor.</summary>
+        protected virtual void OnFloorChanged()
+        {
+            if (!_floorSorterLooked)
+            {
+                _floorSorter = GetComponent<IsometricGroupSorter2D>();
+                _floorSorterLooked = true;
+            }
+            if (_floorSorter != null)
+                _floorSorter.TierOffset = FloorTiers.OrderOffset(m_floor);
+        }
+
         public Vector2 FacingDirection
         {
             get => m_facingDirection;
@@ -976,6 +1010,9 @@ namespace TakoBoyStudios.TopDown2D
             // ticking, but nothing else calls Init. Idempotent, so an instance on its second life
             // simply skips it.
             Init();
+
+            // Back on the ground floor; whoever spawned it says otherwise if it belongs higher (#355).
+            Floor = FloorTiers.Ground;
 
             // Reset for reuse. A pooled entity comes back from its previous life dead: zero HP, in
             // the Dead state, with any knockback or hit lag still on it. Restore it so it spawns

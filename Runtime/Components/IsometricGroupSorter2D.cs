@@ -47,6 +47,12 @@ namespace TakoBoyStudios.TopDown2D
         SortingGroup _sortingGroup;
         TilemapRenderer _tilemapRenderer;
         int _lastSortOrder;
+
+        /// <summary>
+        /// Added to the ground-y order: the draw tier of the floor the body is on (HellWilds #355,
+        /// FloorTiers). Zero on the ground floor, so a one-floor room sorts exactly as before.
+        /// </summary>
+        public int TierOffset { get; set; }
         float _sortingPrecision;
 
         void Awake()
@@ -155,7 +161,7 @@ namespace TakoBoyStudios.TopDown2D
                 // WORLD MODE: Original world Y-based sorting
                 newSortOrder = (int)(
                     (-transform.position.y + (bottomPivotOffset * 0.5f)) * _sortingPrecision
-                );
+                ) + TierOffset;
             }
 
             // Only update if changed

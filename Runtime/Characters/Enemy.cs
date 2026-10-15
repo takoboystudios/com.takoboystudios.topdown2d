@@ -858,6 +858,7 @@ namespace TakoBoyStudios.TopDown2D
             // Credited to this enemy, so a kill by its shot is attributed to it and not to the bullet
             // (T-328). Set after Acquire, whose OnAcquired cleared the pooled body's last instigator.
             projectile.Instigator = this;
+            projectile.Floor = Floor;
 
             // Projectile has its own spawn grace period so it cannot hit whoever fired it.
             projectile.Shoot(direction.normalized);

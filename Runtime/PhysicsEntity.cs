@@ -252,6 +252,17 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         // ----------------------------
+        // Floors
+        // ----------------------------
+        /// <summary>The motor meets the walls of the body's floor and the floors next to it (#355).</summary>
+        protected override void OnFloorChanged()
+        {
+            base.OnFloorChanged();
+            if (motor != null)
+                motor.Floor = Floor;
+        }
+
+        // ----------------------------
         // Flight
         // ----------------------------
         /// <summary>

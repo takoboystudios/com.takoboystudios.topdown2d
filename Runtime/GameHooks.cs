@@ -149,6 +149,32 @@ namespace TakoBoyStudios.TopDown2D
         public static bool IsWeakTo(Element attack, Element target) =>
             WeaknessRule != null && WeaknessRule(attack, target);
 
+        /// <summary>
+        /// The wall layers a body on a given floor meets: its own floor's and the floors next to it
+        /// (HellWilds #355). Unset means one floor, and every body meets its authored mask as before.
+        /// </summary>
+        public static Func<int, int> FloorWallMask;
+
+        /// <summary>Every layer any floor's walls are on, so a body's authored walls can be swapped for its own floor's.</summary>
+        public static Func<int> AllFloorWallsMask;
+
+        /// <summary>
+        /// A body's walls for its floor: the authored mask with every floor's walls taken out and the
+        /// right floors' put back. A mask that meets no walls at all (a flier, a straight shot) is
+        /// left alone, and so is everything when no game has said what floors are.
+        /// </summary>
+        public static int WallsForFloor(int floor, int authoredMask)
+        {
+            if (FloorWallMask == null || AllFloorWallsMask == null)
+                return authoredMask;
+
+            int all = AllFloorWallsMask();
+            if ((authoredMask & all) == 0)
+                return authoredMask;
+
+            return (authoredMask & ~all) | FloorWallMask(floor);
+        }
+
         public static int ContainmentMask() => ExtraContainmentMask != null ? ExtraContainmentMask() : 0;
 
         public static int FrameMask() => PlayerFrameMask != null ? PlayerFrameMask() : 0;
@@ -158,6 +184,8 @@ namespace TakoBoyStudios.TopDown2D
         {
             WeaknessRule = null;
             ExtraContainmentMask = null;
+            FloorWallMask = null;
+            AllFloorWallsMask = null;
             PlayerFrameMask = null;
             HeavyHitBreaks = null;
             HitPushSettleTime = DefaultHitPushSettleTime;

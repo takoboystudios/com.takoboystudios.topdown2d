@@ -177,14 +177,17 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public bool HeldByGroundEdges { get; set; }
 
+        /// <summary>Which floor the body is on, set by its entity (HellWilds #355). It meets that floor's walls and the next floors'.</summary>
+        public int Floor { get; set; } = FloorTiers.Ground;
+
         static int _groundEdgeMask = -1;
         static int GroundEdgeMask =>
             _groundEdgeMask != -1 ? _groundEdgeMask : _groundEdgeMask = LayerMask.GetMask("GroundEdge");
 
         int EffectiveCollisionMask =>
             (containedByCombatBoundary
-                ? collisionMask | (CombatRules.ContainmentMask() & ~_excusedMask)
-                : (int)collisionMask)
+                ? CombatRules.WallsForFloor(Floor, collisionMask) | (CombatRules.ContainmentMask() & ~_excusedMask)
+                : CombatRules.WallsForFloor(Floor, collisionMask))
             | (ContainedByPlayerFrame ? CombatRules.FrameMask() : 0)
             | (collisionMask == 0 ? 0 : BreakableMask)
             | (HeldByGroundEdges && _isGrounded && collisionMask != 0 ? GroundEdgeMask : 0);

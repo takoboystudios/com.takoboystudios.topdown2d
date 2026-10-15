@@ -143,8 +143,11 @@ namespace TakoBoyStudios.TopDown2D
             if (muzzleHeight != 0f)
                 bullet.SetLaunchHeight(muzzleHeight);
 
-            // After Acquire, because a pooled body clears its Instigator when it is handed out.
+            // After Acquire, because a pooled body clears its Instigator when it is handed out. The
+            // floor too: a shot flies on the floor it was fired from (#355).
             bullet.Instigator = _shooter;
+            if (_shooter != null)
+                bullet.Floor = _shooter.Floor;
             bullet.Shoot(finalDirection);
 
             // Camera shake on shoot

@@ -75,7 +75,8 @@ namespace TakoBoyStudios.TopDown2D
         /// encounter the extra term is zero, so this is exactly the serialized mask. It is what keeps
         /// shots inside the fight without every projectile prefab needing to know the layer exists.
         /// </summary>
-        int EffectiveWallLayers => wallLayers | CombatRules.ContainmentMask();
+        int EffectiveWallLayers =>
+            CombatRules.WallsForFloor(Owner != null ? Owner.Floor : FloorTiers.Ground, wallLayers) | CombatRules.ContainmentMask();
 
         [BoxGroup("Behavior")]
         [Tooltip("Special behaviors for this hurtbox")]
@@ -403,6 +404,9 @@ namespace TakoBoyStudios.TopDown2D
             if (!HasBehavior(DamageBoxBehavior.HitAllies) && hitbox.Team == Team)
                 return false;
 
+            if (MissesByFloor(hitbox))
+                return false;
+
             if (MissesByHeight(hitbox))
             {
                 // What the height rule decided, where it decided it: a cross on a target this attack
@@ -415,6 +419,18 @@ namespace TakoBoyStudios.TopDown2D
         }
 
         static readonly Color HeightMissColor = new Color(0.55f, 0.85f, 1f, 1f);
+
+        /// <summary>
+        /// An attack only reaches bodies on its own floor or the next one (HellWilds #355, the
+        /// reference's rule): someone on the storey above is out of reach of a shot fired on the
+        /// ground, and the stairs between are within reach of both.
+        /// </summary>
+        bool MissesByFloor(Hitbox2D hitbox)
+        {
+            if (hitbox == null || Owner == null || hitbox.Owner == null)
+                return false;
+            return Mathf.Abs(hitbox.Owner.Floor - Owner.Floor) > 1;
+        }
 
         /// <summary>
         /// True when the heights say this attack does not reach the target, so a projectile keeps
@@ -529,6 +545,8 @@ namespace TakoBoyStudios.TopDown2D
             if (HasBehavior(DamageBoxBehavior.ContactDamage) && hitbox.IgnoresContactDamage)
                 return false;
             if (MissesByHeight(hitbox)) // the heights say it does not reach (#352)
+                return false;
+            if (MissesByFloor(hitbox)) // a floor away and more (#355)
                 return false;
             if (!HasBehavior(DamageBoxBehavior.HitMultipleTimes) && _alreadyHit.Contains(hitbox))
                 return false;
