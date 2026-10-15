@@ -19,11 +19,11 @@ namespace TakoBoyStudios.TopDown2D
     public static class Shadows
     {
         /// <summary>
-        /// The height, in pixels, at which a shadow is at its smallest. Grim's jump peak (the owner
-        /// set it to 32), so the player's own jump runs the whole range and anything flying higher
-        /// simply stays small. Change it with the jump.
+        /// The height, in pixels, at which a shadow is at its smallest. Grim's jump peak (14 since
+        /// HellWilds #353; it was 32), so the player's own jump runs the whole range and anything
+        /// flying higher simply stays small. Change it with the jump.
         /// </summary>
-        public const float FullHeight = 32f;
+        public const float FullHeight = 14f;
 
         /// <summary>The animation for a size, or null for Off.</summary>
         public static string AnimationName(ShadowSize size)

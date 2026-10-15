@@ -43,14 +43,23 @@ namespace TakoBoyStudios.TopDown2D
         GunComponent m_basicGun;
 
         [BoxGroup("Jump")]
-        [Tooltip("Seconds the jump is in the air. Data-driven, not tied to the animation length. ~0.55.")]
+        [Tooltip("Seconds the jump is in the air, the hang at the top included. Data-driven, not tied to the animation length. ~0.55.")]
         [SerializeField, MinValue(0.05f)]
         float jumpFlightTime = 0.55f;
 
         [BoxGroup("Jump")]
-        [Tooltip("Apex height of the jump, in pixels (fake-Z). Grim's is 32.")]
+        [Tooltip("Apex height of the jump, in pixels (fake-Z). Grim's is 14 (owner, 2026-10-14; it was 32): normal attacks still reach the top of it, ground attacks do not.")]
         [SerializeField, MinValue(0f)]
         float jumpPeakHeight = 12f;
+
+        [BoxGroup("Jump")]
+        [Tooltip(
+            "Seconds the jump holds still at its peak before falling, taken out of the flight time rather than "
+            + "added to it. About 10 frames: 0.17. It is what lets the player feel the moment they are above an "
+            + "attack. 0 is a plain arc."
+        )]
+        [SerializeField, MinValue(0f)]
+        float jumpApexHang;
 
         [BoxGroup("Jump")]
         [Tooltip(
@@ -1167,7 +1176,7 @@ namespace TakoBoyStudios.TopDown2D
                     SetMoveDirection(Vector2.zero);
 
                     if (motor != null)
-                        motor.LaunchArc(jumpPeakHeight, jumpFlightTime);
+                        motor.LaunchArc(jumpPeakHeight, jumpFlightTime, jumpApexHang);
 
                     // The leap pose is character-specific; the airtime is the motor's arc, not the clip.
                     PlayJumpVisual(_jumpDirection);

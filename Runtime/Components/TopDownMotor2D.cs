@@ -206,6 +206,10 @@ namespace TakoBoyStudios.TopDown2D
         float _verticalVelocity;
         float _arcGravity;
         bool _usingArcGravity;
+
+        // The apex hang (#353): seconds an arc still owes at its top, and whether it is holding there now.
+        float _apexHangLeft;
+        bool _hangingAtApex;
         bool _jumpHeldCurrent;
         bool _isGrounded;
         float _lastOnGroundTime = -999f;
@@ -328,21 +332,38 @@ namespace TakoBoyStudios.TopDown2D
         /// Gravity is derived from the arc rather than taken from the inspector, so the flight time
         /// is exactly what was asked for. It resets to the serialized value on landing.
         /// </summary>
-        public void LaunchArc(float peakHeight, float flightTime)
+        public void LaunchArc(float peakHeight, float flightTime) => LaunchArc(peakHeight, flightTime, 0f);
+
+        /// <summary>
+        /// An arc that holds still at its peak for <paramref name="apexHang"/> seconds before it falls:
+        /// the player's jump (#353, owner 2026-10-14). The hang is what makes a low jump read: the
+        /// moment above an attack becomes a moment rather than an instant.
+        ///
+        /// <paramref name="flightTime"/> is still the whole time in the air, hang included, so a jump
+        /// given a hang keeps its airtime and only its rise and fall get quicker.
+        /// </summary>
+        public void LaunchArc(float peakHeight, float flightTime, float apexHang)
         {
             if (flightTime <= 0.0001f)
                 return;
 
             float h = Mathf.Max(peakHeight, 0.001f);
+            float hang = Mathf.Clamp(apexHang, 0f, flightTime * 0.8f);
+            float arcTime = flightTime - hang;
 
-            // Standard projectile arc: peak at h, back to zero at flightTime.
-            _arcGravity = 8f * h / (flightTime * flightTime);
-            _verticalVelocity = 4f * h / flightTime;
+            // Standard projectile arc: peak at h, back to zero after arcTime of rising and falling.
+            _arcGravity = 8f * h / (arcTime * arcTime);
+            _verticalVelocity = 4f * h / arcTime;
 
+            _apexHangLeft = hang;
+            _hangingAtApex = false;
             _height = 0.0001f;
             _isGrounded = false;
             _usingArcGravity = true;
         }
+
+        /// <summary>True while an arc is holding still at its peak.</summary>
+        public bool IsHangingAtApex => _hangingAtApex;
 
         bool _hovering;
         float _hoverHeight;
@@ -355,6 +376,7 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public void SetHover(float height)
         {
+            ClearApexHang();
             _hovering = true;
             _hoverHeight = Mathf.Max(0f, height);
             _height = _hoverHeight;
@@ -372,6 +394,7 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public void ResetVertical()
         {
+            ClearApexHang();
             _height = 0f;
             _verticalVelocity = 0f;
             _isGrounded = true;
@@ -386,8 +409,16 @@ namespace TakoBoyStudios.TopDown2D
         /// </summary>
         public void Bonk()
         {
+            // A bonk is a fall from here, not a hang at a ceiling.
+            ClearApexHang();
             if (_verticalVelocity > 0f)
                 _verticalVelocity = 0f;
+        }
+
+        void ClearApexHang()
+        {
+            _apexHangLeft = 0f;
+            _hangingAtApex = false;
         }
         #endregion
 
@@ -436,11 +467,39 @@ namespace TakoBoyStudios.TopDown2D
             // variable-height cut would distort that, so they are skipped while arcing.
             float g = _usingArcGravity ? _arcGravity : gravity;
 
+            // The apex hang (#353): holding at the top, nothing moves until the hang is spent.
+            if (_hangingAtApex)
+            {
+                _apexHangLeft -= dt;
+                if (_apexHangLeft > 0f)
+                    return;
+                ClearApexHang();
+            }
+            else if (_usingArcGravity && _apexHangLeft > 0f && _verticalVelocity > 0f && _verticalVelocity <= g * dt)
+            {
+                // The peak falls inside this step: rise exactly the rest of the way to it, then hold.
+                _height += _verticalVelocity * _verticalVelocity / (2f * g);
+                _verticalVelocity = 0f;
+                _hangingAtApex = true;
+                return;
+            }
+
             if (!_usingArcGravity && variableJump && _verticalVelocity > 0f && !_jumpHeldCurrent)
                 g *= jumpCutGravityScale;
-            _verticalVelocity -= g * dt;
 
-            _height += _verticalVelocity * dt;
+            if (_usingArcGravity)
+            {
+                // An arc is stepped exactly, so it peaks at the height it was given (#353). Stepping
+                // speed before position, as below, falls short by about a tick of rise: every arc
+                // peaked 5 to 10 percent low, Grim's 32 px jump at 30 on the 50 Hz physics tick.
+                _height += _verticalVelocity * dt - 0.5f * g * dt * dt;
+                _verticalVelocity -= g * dt;
+            }
+            else
+            {
+                _verticalVelocity -= g * dt;
+                _height += _verticalVelocity * dt;
+            }
 
             if (_height <= 0f)
             {
@@ -450,6 +509,7 @@ namespace TakoBoyStudios.TopDown2D
                 _isGrounded = true;
                 _lastOnGroundTime = Time.time;
                 _usingArcGravity = false;
+                ClearApexHang();
             }
         }
         #endregion
