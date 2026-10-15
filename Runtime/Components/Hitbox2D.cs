@@ -64,6 +64,15 @@ namespace TakoBoyStudios.TopDown2D
         [SerializeField]
         bool m_ignoresContactDamage = false;
 
+        [BoxGroup("Height")]
+        [Tooltip(
+            "Half of how tall this body counts for when a Normal attack compares heights, in pixels. "
+                + "The attack lands when the two heights are within its reach plus this. 8: a body is "
+                + "about a tile tall."
+        )]
+        [SerializeField, Sirenix.OdinInspector.MinValue(0f)]
+        float m_halfHeight = 8f;
+
         // Properties
         public bool Invincible => m_invincible || m_invincibilityTimer > 0f;
         public float InvincibilityTimeRemaining => m_invincibilityTimer;
@@ -76,6 +85,9 @@ namespace TakoBoyStudios.TopDown2D
         /// hitbox no damage: it is only hurt by active strikes. Scenery like a barrel sets this.
         /// </summary>
         public bool IgnoresContactDamage => m_ignoresContactDamage;
+
+        /// <summary>Half of how tall this body counts for in a Normal attack's height check (#352).</summary>
+        public float HalfHeight => m_halfHeight;
 
         public void SetPhased(bool value) => m_phased = value;
 

@@ -8,15 +8,29 @@ using UnityEngine;
 namespace TakoBoyStudios.TopDown2D
 {
     /// <summary>
-    /// How high an attack reaches. Ground attacks pass harmlessly under a target that has jumped clear
-    /// of the floor; AllHeights attacks reach a target whether it is grounded or airborne, which is how
-    /// flying enemies and explosions stay dangerous to a jumping player. This is the whole combat side
-    /// of the height system: it is a semantic mode, not real 3D.
+    /// How high an attack reaches: a class on the attack, compared with the heights of the attacker and
+    /// the target (HellWilds #352, after the reference's five classes). Every body's height is its
+    /// Entity.Z, how far it is above the floor it stands on.
+    ///
+    /// The numbers are the saved values, so they never change: Ground and AllHeights were the only two,
+    /// and every prefab that already uses them means exactly what it did.
     /// </summary>
     public enum AttackHeight
     {
-        Ground,
-        AllHeights,
+        /// <summary>Misses a target at or above the clearance height: a jump goes over it.</summary>
+        Ground = 0,
+
+        /// <summary>No height check: explosions, the player's shots.</summary>
+        AllHeights = 1,
+
+        /// <summary>
+        /// Lands on a target within reach of the attacker's own height: the attack's reach plus the
+        /// target's half height. A shot at chest height hits a jumping player too.
+        /// </summary>
+        Normal = 2,
+
+        /// <summary>Only lands on a target at or above the clearance height: a floating body that hurts only someone who jumps into it.</summary>
+        Air = 3,
     }
 
     /// <summary>
@@ -92,8 +106,11 @@ namespace TakoBoyStudios.TopDown2D
         [Tooltip(
             "Ground: passes under a target that has jumped above the clearance height (a bullet keeps "
                 + "going, contact fails to land). AllHeights: hits regardless of the target's height, so "
-                + "flyers and explosions still threaten an airborne player. Most enemy attacks are "
-                + "Ground; player shots and flying-enemy contact should be AllHeights."
+                + "explosions and the player's shots threaten anything. Normal: lands on a target within "
+                + "reach of the attacker's own height, so a shot at chest height still catches a jump "
+                + "(the reference's floating bubble). Air: lands only on a target at or above the "
+                + "clearance height, for a floating body that hurts only someone who jumps into it. Most "
+                + "enemy attacks are Ground; player shots and blasts are AllHeights."
         )]
         [SerializeField]
         AttackHeight m_attackHeight = AttackHeight.Ground;
@@ -101,11 +118,21 @@ namespace TakoBoyStudios.TopDown2D
         [BoxGroup("Height")]
         [Tooltip(
             "For a Ground attack, the target height (in pixels) at and above which this attack passes "
-                + "underneath. Below it the target is still hit, so takeoff and landing carry risk while "
-                + "the apex is clear. Around 4."
+                + "underneath; for Air, the height a target must reach to be hit. Below it a Ground "
+                + "attack still lands, so takeoff and landing carry risk while the top of the jump is "
+                + "clear. Around 4."
         )]
         [SerializeField, MinValue(0f)]
         float m_groundClearance = 4f;
+
+        [BoxGroup("Height")]
+        [Tooltip(
+            "For a Normal attack, how far above and below its own height it reaches, in pixels. It "
+                + "lands when the target's height is within this plus the target's half height. 8, so a "
+                + "Normal attack reaches anything within 16 of its own height: Grim's whole 14 px jump."
+        )]
+        [SerializeField, MinValue(0f), ShowIf("@m_attackHeight == TakoBoyStudios.TopDown2D.AttackHeight.Normal")]
+        float m_heightReach = 8f;
 
         [BoxGroup("Walls")]
         [Tooltip(
@@ -168,6 +195,7 @@ namespace TakoBoyStudios.TopDown2D
         }
         public AttackHeight AttackHeight => m_attackHeight;
         public float GroundClearance => m_groundClearance;
+        public float HeightReach => m_heightReach;
 
         // Events
         public event Action<HitEvent> OnHitEntity;
@@ -189,7 +217,26 @@ namespace TakoBoyStudios.TopDown2D
         public override void Init(Entity owner)
         {
             base.Init(owner);
+
+            // A box under the owner's lifted visual already moves with its height; any other box is
+            // lifted by the owner's height when it is checked (DrawnLift).
+            _underLiftedVisual =
+                owner != null
+                && owner.character != null
+                && transform != owner.character
+                && transform.IsChildOf(owner.character);
         }
+
+        bool _underLiftedVisual;
+
+        /// <summary>
+        /// How far up this box's owner is drawn, which is where the box is checked (#352). What a
+        /// hovering shot or a flier's body hits follows its sprite, the same way what a bullet hits on
+        /// a target follows the target's sprite (Entity.LiftHitboxes): both sides of a hit are where
+        /// the player sees them, and the heights are then compared by class. Walls are still tested on
+        /// the floor, because a wall only stops what is on the floor.
+        /// </summary>
+        float DrawnLift => Owner != null && !_underLiftedVisual ? Owner.Z : 0f;
 
 #if UNITY_EDITOR
         /// <summary>The wall box, drawn in the Scene view whenever this hurtbox is selected, so it can be authored by eye.</summary>
@@ -229,7 +276,8 @@ namespace TakoBoyStudios.TopDown2D
         {
             hitEvent = default;
 
-            Vector2 origin = startPos + (Vector2)Center;
+            Vector2 floor = startPos + (Vector2)Center;
+            Vector2 origin = floor + new Vector2(0f, DrawnLift);
             float distance = velocity.magnitude * deltaTime;
             Vector2 direction = distance > 0.0001f ? velocity.normalized : Vector2.right;
 
@@ -241,7 +289,7 @@ namespace TakoBoyStudios.TopDown2D
             if (!HasBehavior(DamageBoxBehavior.IgnoreWalls))
             {
                 // The wall test is the shot's footprint on the floor when it has one, never the art.
-                Vector2 wallOrigin = separateWallBox ? startPos + wallBoxCenter : origin;
+                Vector2 wallOrigin = separateWallBox ? startPos + wallBoxCenter : floor;
                 Vector2 wallSize = separateWallBox ? wallBoxSize : (Vector2)Size;
 
                 if (separateWallBox)
@@ -348,23 +396,70 @@ namespace TakoBoyStudios.TopDown2D
         /// through it instead of dying on an invisible body. An invincible-but-present hitbox is still
         /// a target: it stops the shot, it just takes no damage.
         /// </summary>
-        bool IsOpposingTarget(Hitbox2D hitbox) =>
-            hitbox != null
-            && !hitbox.Phased
-            && !PassesOverTarget(hitbox)
-            && (HasBehavior(DamageBoxBehavior.HitAllies) || hitbox.Team != Team);
+        bool IsOpposingTarget(Hitbox2D hitbox)
+        {
+            if (hitbox == null || hitbox.Phased)
+                return false;
+            if (!HasBehavior(DamageBoxBehavior.HitAllies) && hitbox.Team == Team)
+                return false;
+
+            if (MissesByHeight(hitbox))
+            {
+                // What the height rule decided, where it decided it: a cross on a target this attack
+                // went over or under, coloured by the class that let it pass.
+                DebugDraw.Cross(hitbox.transform.position, 6f, HeightMissColor);
+                return false;
+            }
+
+            return true;
+        }
+
+        static readonly Color HeightMissColor = new Color(0.55f, 0.85f, 1f, 1f);
 
         /// <summary>
-        /// True when this is a Ground attack and the target has jumped to or past the clearance height,
-        /// so the attack should slip underneath: a projectile keeps going (not a strike), contact does
-        /// not land. The target's height is its owner's fake-Z (Entity.Z = motor height). AllHeights
-        /// attacks never pass under.
+        /// True when the heights say this attack does not reach the target, so a projectile keeps
+        /// going (not a strike) and contact does not land. The heights are the owners' Entity.Z
+        /// (#352); the rule itself is <see cref="HeightReaches"/>.
         /// </summary>
-        bool PassesOverTarget(Hitbox2D hitbox) =>
-            m_attackHeight == AttackHeight.Ground
-            && hitbox != null
-            && hitbox.Owner != null
-            && hitbox.Owner.Z >= m_groundClearance;
+        bool MissesByHeight(Hitbox2D hitbox)
+        {
+            if (m_attackHeight == AttackHeight.AllHeights || hitbox == null)
+                return false;
+
+            float attackerZ = Owner != null ? Owner.Z : 0f;
+            float targetZ = hitbox.Owner != null ? hitbox.Owner.Z : 0f;
+            return !HeightReaches(m_attackHeight, attackerZ, targetZ, m_groundClearance, m_heightReach, hitbox.HalfHeight);
+        }
+
+        /// <summary>
+        /// The whole height rule, on its own so it can be tested without a scene. Heights in pixels
+        /// above the floor.
+        /// - Ground: lands while the target is below the clearance height.
+        /// - Air: lands once the target is at or above it.
+        /// - Normal: lands when the target is within reach plus its half height of the attacker.
+        /// - AllHeights: always.
+        /// </summary>
+        public static bool HeightReaches(
+            AttackHeight height,
+            float attackerZ,
+            float targetZ,
+            float clearance,
+            float reach,
+            float targetHalfHeight
+        )
+        {
+            switch (height)
+            {
+                case AttackHeight.Ground:
+                    return targetZ < clearance;
+                case AttackHeight.Air:
+                    return targetZ >= clearance;
+                case AttackHeight.Normal:
+                    return Mathf.Abs(targetZ - attackerZ) <= reach + targetHalfHeight;
+                default:
+                    return true;
+            }
+        }
 
         static readonly System.Comparison<RaycastHit2D> ByDistance =
             (a, b) => a.distance.CompareTo(b.distance);
@@ -372,7 +467,7 @@ namespace TakoBoyStudios.TopDown2D
         public int CheckArea(Vector2 centerPos)
         {
             _areaResults.Clear();
-            Vector2 areaCenter = centerPos + (Vector2)Center;
+            Vector2 areaCenter = centerPos + (Vector2)Center + new Vector2(0f, DrawnLift);
 
             // A circle when one is set, which is what a ring on the floor means. The overlay draws
             // the same circle the query uses, so what Shift+D shows is what hits.
@@ -433,7 +528,7 @@ namespace TakoBoyStudios.TopDown2D
             // Both sides are generic combat properties, so nothing here knows what a barrel is.
             if (HasBehavior(DamageBoxBehavior.ContactDamage) && hitbox.IgnoresContactDamage)
                 return false;
-            if (PassesOverTarget(hitbox)) // a Ground attack cannot land on a target that jumped clear
+            if (MissesByHeight(hitbox)) // the heights say it does not reach (#352)
                 return false;
             if (!HasBehavior(DamageBoxBehavior.HitMultipleTimes) && _alreadyHit.Contains(hitbox))
                 return false;
